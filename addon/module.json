@@ -1,0 +1,71 @@
+{
+  "id": "webstream",
+  "name": "Force Webstream",
+  "abbrev": "WS",
+  "version": "0.1.0",
+  "description": "Web audio search/streaming sound generator for the Akai Force (yt-dlp/ffmpeg backed). Port of Charles Vestal's schwung-webstream (https://github.com/charlesvestal/schwung-webstream) for Ableton Move — same DSP core and provider backends, new Force host/web GUI/shadow GUI.",
+  "author": "Port for Force/MockbaMod by this repo's maintainer; original DSP core and provider daemon by Charles Vestal (schwung-webstream, MIT)",
+  "license": "MIT",
+  "dsp": "dsp.so",
+  "api_version": 2,
+  "capabilities": {
+    "audio_out": true,
+    "audio_in": false,
+    "midi_in": false,
+    "midi_out": false,
+    "component_type": "sound_generator",
+    "chain_params": [
+      {
+        "key": "play_pause_step",
+        "short_name": "Pause",
+        "name": "Play/Pause",
+        "type": "enum",
+        "options": ["idle", "trigger"],
+        "default": "idle"
+      },
+      {
+        "key": "rewind_15_step",
+        "short_name": "Rewind",
+        "name": "Rewind 15s",
+        "type": "enum",
+        "options": ["idle", "trigger"],
+        "default": "idle"
+      },
+      {
+        "key": "forward_15_step",
+        "short_name": "Forward",
+        "name": "Forward 15s",
+        "type": "enum",
+        "options": ["idle", "trigger"],
+        "default": "idle"
+      },
+      {
+        "key": "gain",
+        "name": "Gain",
+        "type": "float",
+        "min": 0.0,
+        "max": 2.0,
+        "default": 1.0,
+        "step": 0.05
+      },
+      {
+        "key": "stop_step",
+        "name": "Stop",
+        "type": "enum",
+        "options": ["idle", "trigger"],
+        "default": "idle"
+      },
+      {
+        "key": "restart_step",
+        "short_name": "RSTRT",
+        "name": "Restart",
+        "type": "enum",
+        "options": ["idle", "trigger"],
+        "default": "idle"
+      }
+    ]
+  },
+  "defaults": {
+    "gain": 1.0
+  }
+}

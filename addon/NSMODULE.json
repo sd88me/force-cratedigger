@@ -1,0 +1,17 @@
+{
+  "NAME": "Webstream",
+  "DESCRIPTION": "Search/stream web audio (YouTube, SoundCloud, archive.org, Freesound, Discogs crate-dig) as a Force sound-generator voice. Port of Charles Vestal's schwung-webstream for Ableton Move (MIT). Requires the separate ForceAudioIn addon to be enabled (arms the shared injection tap at boot, zero voices) - this toggle only starts/stops the webstream_host process itself, no LD_PRELOAD/acvs involved. Also requires bin/yt-dlp and bin/ffmpeg to be present in this addon's folder - see README.md/scripts/build-deps.sh. Autoload is deliberately unavailable: always start it after boot, from this page.",
+  "PROCESSNAME": "webstream_host",
+  "DIRNAME": "ForceWebstream",
+  "FILENAME": "webstream_host",
+  "BACKGROUND": true,
+  "AUTOLAUNCHABLE": false,
+  "ARGUMENTS": [
+    { "NAME": "module-dir flag", "VALUE": "--module-dir" },
+    { "NAME": "module directory (module.json/bin source) - EDIT to your device's real mmPath, see README", "VALUE": "/media/CHANGE_ME/AddOns/ForceWebstream" },
+    { "NAME": "ctrl-sock flag", "VALUE": "--ctrl-sock" },
+    { "NAME": "control socket path", "VALUE": "/tmp/webstream_ctrl.sock" },
+    { "NAME": "mix-slot flag", "VALUE": "--mix-slot" },
+    { "NAME": "forceAudioIn voice slot (0-3)", "VALUE": "0" }
+  ]
+}
