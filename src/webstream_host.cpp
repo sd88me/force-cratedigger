@@ -205,14 +205,23 @@ static void timer_loop() {
  *  - "mix.*" — host-level output-mix controls (on/off, volume, L/R/L+R
  *    routing), same convention as maze_host/force-acid. Lives in the
  *    shared-memory struct forceAudioIn.so reads directly.
- *  - "search_results_json" (GET only) — the DSP core exposes each search
- *    result as a set of separately-indexed keys
- *    (search_result_title_<n>/_channel_<n>/_duration_<n>/_provider_<n>/
- *    _url_<n>, up to search_count), one get_param call per field per
- *    result. This aggregates that into one JSON array of
+ *  - "search_results_json" / "search_results_shadow_json" (GET only) — the
+ *    DSP core exposes each search result as a set of separately-indexed
+ *    keys (search_result_title_<n>/_channel_<n>/_duration_<n>/
+ *    _provider_<n>/_url_<n>, up to search_count), one get_param call per
+ *    field per result. Both aggregate that into one JSON array of
  *    {"label": "..."} objects, the shape Force Shadow's `list` widget
  *    expects from a single GET call (see shadow_page.conf and
- *    force-shadow/docs/adding-a-page.md's `list` widget spec).
+ *    force-shadow/docs/adding-a-page.md's `list` widget spec) — the
+ *    "_shadow_" variant additionally runs every field through
+ *    shadow_font_safe() first (uppercase + Force Shadow's actual glyph
+ *    set only — see that function's own comment), since Force Shadow's
+ *    baked font has no lowercase glyphs and a title/channel with
+ *    lowercase or punctuation outside its small supported set renders as
+ *    scattered near-blank text otherwise (confirmed by an offline render
+ *    before this existed). shadow_page.conf's `list` widget uses the
+ *    "_shadow_" key; the web GUI uses the plain one, since a browser has
+ *    a real font and shouldn't be limited to it.
  *  - "play_result_index" (SET only) — Force Shadow's `list` widget sends a
  *    plain `SET <key> <index>` on tap; playing a search result actually
  *    needs two of the core's own real keys set together
@@ -271,7 +280,37 @@ static std::string json_escape(const std::string &s) {
     return out;
 }
 
-static std::string build_search_results_json_locked() {
+/* Force Shadow's baked font (force-shadow/src/font8x8.h's font_chars)
+ * supports exactly: space, A-Z (uppercase only — no lowercase glyphs at
+ * all), 0-9, and ". - / > % + :" — nothing else, including no em dash,
+ * brackets, parentheses, commas, or apostrophes. Any unsupported byte
+ * renders as an invisible space (font_glyph_index() falls back to glyph
+ * 0), not a placeholder box — confirmed by rendering this project's own
+ * shadow_page.conf RESULTS tab offline (docs/previews/shadow_results.png
+ * before this fix): real video/track titles came out as scattered,
+ * near-illegible single letters and digits with the rest of each title
+ * silently blanked. This maps a string down to that supported set for
+ * the shadow GUI specifically; the web GUI (see search_results_json,
+ * without this transform) keeps full mixed-case titles since a browser
+ * has a real font. */
+static std::string shadow_font_safe(const std::string &s) {
+    static const std::string allowed = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/>%+:";
+    std::string out;
+    out.reserve(s.size());
+    bool last_was_space = false;
+    for (unsigned char c : s) {
+        char u = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : (char)c;
+        if (allowed.find(u) == std::string::npos) u = ' ';
+        if (u == ' ' && last_was_space) continue;   /* collapse runs left by stripped punctuation */
+        out += u;
+        last_was_space = (u == ' ');
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    size_t start = out.find_first_not_of(' ');
+    return (start == std::string::npos) ? std::string() : out.substr(start);
+}
+
+static std::string build_search_results_json_locked(bool shadow_safe) {
     char buf[256];
     int n = g_api->get_param(g_inst, "search_count", buf, sizeof(buf));
     int count = (n > 0) ? std::atoi(std::string(buf, n).c_str()) : 0;
@@ -297,10 +336,21 @@ static std::string build_search_results_json_locked() {
         n = g_api->get_param(g_inst, key, buf, sizeof(buf));
         if (n > 0) provider.assign(buf, n);
 
-        std::string label = title.empty() ? "(untitled)" : title;
-        if (!channel.empty()) label += "  \xe2\x80\x94 " + channel;   /* em dash */
-        if (!duration.empty()) label += "  [" + duration + "]";
-        if (!provider.empty()) label = "[" + provider + "] " + label;
+        std::string label;
+        if (shadow_safe) {
+            /* Only ". - / > % + :" survive shadow_font_safe()'s filter, so
+             * build the separator structure from those, not from brackets/
+             * em dash/parens which would just get stripped anyway. */
+            label = shadow_font_safe(title.empty() ? "UNTITLED" : title);
+            if (!channel.empty()) label += " - " + shadow_font_safe(channel);
+            if (!duration.empty()) label += " " + shadow_font_safe(duration);
+            if (!provider.empty()) label = shadow_font_safe(provider) + ": " + label;
+        } else {
+            label = title.empty() ? "(untitled)" : title;
+            if (!channel.empty()) label += "  \xe2\x80\x94 " + channel;   /* em dash */
+            if (!duration.empty()) label += "  [" + duration + "]";
+            if (!provider.empty()) label = "[" + provider + "] " + label;
+        }
 
         if (i) json += ",";
         json += "{\"label\":\"" + json_escape(label) + "\"}";
@@ -366,12 +416,47 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
-        if (!strcmp(key, "search_results_json")) {
+        if (!strcmp(key, "search_results_json") || !strcmp(key, "search_results_shadow_json")) {
+            bool shadow_safe = !strcmp(key, "search_results_shadow_json");
             std::lock_guard<std::mutex> lk(g_lock);
-            std::string reply = build_search_results_json_locked() + "\n";
+            std::string reply = build_search_results_json_locked(shadow_safe) + "\n";
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
+        /* Generic "<real key>_shadow" convention: strip the suffix, fetch
+         * the real value (core or mix.*), and run it through
+         * shadow_font_safe() before returning. Exists because most of the
+         * DSP core's own text status values (stream_status: "streaming"/
+         * "paused"/...; search_status: "idle"/"searching"/...) are
+         * lowercase words that would render as scattered near-blank text
+         * on Force Shadow's uppercase-only font otherwise (same class of
+         * bug search_results_shadow_json's own comment describes) —
+         * confirmed by an offline render before this existed. shadow_page
+         * .conf's STATUS/SEARCH readouts use e.g. get=stream_status_shadow.
+         * playback_time is exempt (digits + ':' only, already safe) so
+         * its readout can use the plain key directly. */
+        std::string keystr(key);
+        static const std::string kShadowSuffix = "_shadow";
+        if (keystr.size() > kShadowSuffix.size() &&
+            keystr.compare(keystr.size() - kShadowSuffix.size(), kShadowSuffix.size(), kShadowSuffix) == 0) {
+            std::string real_key = keystr.substr(0, keystr.size() - kShadowSuffix.size());
+            std::string mix_v;
+            std::string raw;
+            if (handle_mix_get(real_key, mix_v)) {
+                raw = mix_v;
+            } else {
+                char buf[4096];
+                int n;
+                { std::lock_guard<std::mutex> lk(g_lock);
+                  n = g_api->get_param(g_inst, real_key.c_str(), buf, sizeof(buf)); }
+                if (n <= 0) { send(fd, "ERR\n", 4, 0); return; }
+                raw.assign(buf, n);
+            }
+            std::string reply = shadow_font_safe(raw) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+
         char buf[4096];
         int n;
         { std::lock_guard<std::mutex> lk(g_lock);
