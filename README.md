@@ -162,12 +162,17 @@ GUI's Crate Dig tab exposes exactly those four fields.
   videos, but is a weaker fallback than deno for a minority of more
   obfuscated challenges. SoundCloud/archive.org/Freesound/crate-dig don't
   use deno at all and are unaffected.
-- **Downloads land in `/tmp/force-webstream-downloads`**, not a real
-  sample-library path. The Force has no fixed, serial-independent path
-  for its own sample library (it's mounted per-device under
-  `/media/<serial>/...`), and guessing wrong seemed worse than being
-  explicit — move files from there into your library via the Force's own
-  file browser.
+- ~~Downloads land in `/tmp`~~ — fixed: downloads now go to
+  `/sdcard/Force Documents/Samples/Webstream`, the same stable,
+  serial-independent output-dir convention
+  [force-audioin](https://github.com/sd88me/force-audioin)'s own Skipback
+  feature (`src/skipbackHost.c`'s `DEFAULT_OUTPUT_DIR`) already uses for
+  the same reason — `/sdcard` is the Force's own internal-storage mount,
+  not a removable card's `/media/<serial>/...` path, and "Force
+  Documents/Samples" is where the Force's own sample browser looks, so a
+  download shows up in your library without moving it by hand. See
+  `mkdir_p()` in `src/dsp/yt_stream_plugin.c`, also ported from
+  `skipbackHost.c`.
 - **No on-device text entry for search queries.** The shadow GUI's
   `RESULTS` tab browses and plays whatever the *last search* returned
   (from either UI) and controls transport/output, but typing a new query

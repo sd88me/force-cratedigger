@@ -2095,11 +2095,30 @@ static bool allow_trigger(uint64_t *last_ms, uint64_t debounce_ms) {
 
 /* ---- WAV download -------------------------------------------------------- */
 
-/* Force has no fixed, serial-independent path for its own sample library
- * (it's mounted per-device under /media/<serial>/...); rather than guess
- * wrong, downloads land under /tmp and the addon's README tells the user
- * how to move them into their own library from the Force's file browser. */
-#define DOWNLOAD_DIR "/tmp/force-webstream-downloads"
+/* Same default output dir force-audioin's skipbackHost.c uses for its own
+ * WAV saves (DEFAULT_OUTPUT_DIR there) - /sdcard is the Force's stable,
+ * serial-independent mount for its own internal storage (unlike
+ * /media/<serial>/... for a removable card), and "Force Documents/Samples"
+ * is where the Force's own sample browser looks - so a file saved here
+ * shows up in the Force's own library without the user having to move it
+ * by hand, matching what skipbackHost already does for the same reason. */
+#define DOWNLOAD_DIR "/sdcard/Force Documents/Samples/Webstream"
+
+/* mkdir -p, ported from force-audioin/src/skipbackHost.c's own mkdir_p() -
+ * DOWNLOAD_DIR is three levels deep and may not exist yet on a fresh
+ * install, unlike upstream's single-level DOWNLOAD_DIR this replaced. */
+static void mkdir_p(const char *dir) {
+    char tmp[512];
+    snprintf(tmp, sizeof(tmp), "%s", dir);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(tmp, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0777);
+}
 
 static void sanitize_filename(const char *in, char *out, size_t out_len) {
     size_t j = 0;
@@ -2144,7 +2163,7 @@ static void *download_thread_main(void *arg) {
 
     yt_log("download_thread: starting");
 
-    mkdir(DOWNLOAD_DIR, 0755);
+    mkdir_p(DOWNLOAD_DIR);
 
     sanitize_filename(inst->download_title, safe_title, sizeof(safe_title));
     if (safe_title[0] == '\0') snprintf(safe_title, sizeof(safe_title), "download");
