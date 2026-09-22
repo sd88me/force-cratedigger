@@ -289,6 +289,12 @@ static void timer_loop() {
  *    mechanism Force Shadow's own engine on/off button uses. See
  *    send_skipback_toggle()'s own comment for why this goes through
  *    nodeServer rather than this process spawning skipbackHost itself.
+ *    Playing a result (play_result_index above) also writes the track's
+ *    title/channel to /tmp/force_nowplaying.txt — see
+ *    write_nowplaying_file()'s own comment — so a skipback recording
+ *    taken while a track is playing gets named after it instead of the
+ *    Force project name (skipbackHost.c change, force-audioin repo,
+ *    not this one). Cleared on "stop"/"stop_step" and on exit.
  * ------------------------------------------------------------------------- */
 static bool handle_mix_set(const std::string &key, const std::string &val) {
     if (key == "mix.enabled") {
@@ -615,6 +621,27 @@ static std::string build_search_results_json_locked(bool shadow_safe) {
     return json;
 }
 
+/* Generic "now playing" file force-audioin's skipbackHost.c reads (added
+ * there for this — see that repo's own commit) to name a skipback
+ * recording after the actual track instead of the Force project name;
+ * tempo in the filename stays the real project tempo either way,
+ * skipbackHost's own lookup, untouched. Not cratedigger-specific by
+ * convention — any addon that knows what's actually playing can write
+ * here — but this is the only writer that currently exists. Cleared on
+ * stop so a later non-cratedigger skipback recording (or a stale
+ * cratedigger session) doesn't get mislabeled with an old title; also
+ * self-expires after 10 minutes on skipbackHost's own side regardless. */
+static const char *NOWPLAYING_PATH = "/tmp/force_nowplaying.txt";
+
+static void write_nowplaying_file(const std::string &text) {
+    FILE *f = fopen(NOWPLAYING_PATH, "w");
+    if (!f) return;
+    fputs(text.c_str(), f);
+    fputc('\n', f);
+    fclose(f);
+}
+static void clear_nowplaying_file() { unlink(NOWPLAYING_PATH); }
+
 static bool handle_play_result_index_locked(int idx, std::string &err) {
     char buf[256];
     char key[48];
@@ -628,6 +655,14 @@ static bool handle_play_result_index_locked(int idx, std::string &err) {
     if (n <= 0) { err = "no such result"; return false; }
     std::string url(buf, n);
 
+    std::snprintf(key, sizeof(key), "search_result_title_%d", idx);
+    n = g_api->get_param(g_inst, key, buf, sizeof(buf));
+    std::string title = (n > 0) ? std::string(buf, n) : std::string();
+
+    std::snprintf(key, sizeof(key), "search_result_channel_%d", idx);
+    n = g_api->get_param(g_inst, key, buf, sizeof(buf));
+    std::string channel = (n > 0) ? std::string(buf, n) : std::string();
+
     g_api->set_param(g_inst, "stream_provider", provider.c_str());
     g_api->set_param(g_inst, "stream_url", url.c_str());
     /* Not cratedig-specific despite the name — the core's own next_track_step
@@ -638,6 +673,12 @@ static bool handle_play_result_index_locked(int idx, std::string &err) {
     char idx_str[16];
     std::snprintf(idx_str, sizeof(idx_str), "%d", idx);
     g_api->set_param(g_inst, "cratedig_result_index", idx_str);
+
+    if (!title.empty()) {
+        std::string nowplaying = title;
+        if (!channel.empty()) nowplaying += " - " + channel;
+        write_nowplaying_file(nowplaying);
+    }
     return true;
 }
 
@@ -755,6 +796,9 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             send_skipback_toggle(!now_running);
             send(fd, "OK\n", 3, 0);
             return;
+        }
+        if (!strcmp(key, "stop") || !strcmp(key, "stop_step")) {
+            clear_nowplaying_file();
         }
         std::lock_guard<std::mutex> lk(g_lock);
         g_api->set_param(g_inst, key, val);
@@ -1059,6 +1103,7 @@ int main(int argc, char **argv) {
     timer.join();
     close(lfd);
     unlink(g_ctrl_sock_path.c_str());
+    clear_nowplaying_file();
     {
         std::lock_guard<std::mutex> lk(g_lock);
         g_api->destroy_instance(g_inst);
