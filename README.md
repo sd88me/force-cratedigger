@@ -48,8 +48,12 @@ browser to see it, or read the file directly.
   control (play/pause, ±15s seek, stop, restart), gain, download to WAV,
   and a **Skipback Rec** button (see below).
 - **Shadow GUI** (`addon/shadow_page.conf`): a `style=td3` page themed
-  after a vintage Akai MPC60 — `SHIFT+SCENE-6` opens it directly on the
-  Force's own touchscreen, two tabs:
+  after a vintage Akai MPC60, slot 9 — reachable from the on-screen
+  **ADD-ONS** launcher (Force Shadow's own slot 7), since all seven
+  direct `SHIFT+SCENE-N` hardware combos were already claimed by other
+  addons on this device by the time this one was built (edit `page=` in
+  `shadow_page.conf` if your own device has a free slot 1-7 and you'd
+  rather have a direct combo). Two tabs:
   - **PLAY** — transport, output gain/routing, engine on/off, a
     **Skipback Rec** button, a results list (tap to play), and its own
     **SEARCH** button so a filter set on the FILTERS tab can be re-run
@@ -221,8 +225,9 @@ Then, separately:
    enabled (its own `manage.sh ENABLE`) — it arms the shared audio tap
    this addon writes into. It is a hard dependency for audio output.
 2. Start `cratedigger_host` itself from the nodeServer Modules page
-   (`http://<force-ip>:8080/moduler`) or via `SHIFT+SCENE-6`'s engine
-   button on the shadow page — it does **not** auto-launch at boot (see
+   (`http://<force-ip>:8080/moduler`) or via the shadow page's own engine
+   button (ADD-ONS launcher → CRATE DIGGER, or your own device's combo if
+   you moved it to a free 1-7 slot) — it does **not** auto-launch at boot (see
    `addon/NSMODULE.json`'s `AUTOLAUNCHABLE: false` and the comment in
    `addon/manage.sh`).
 3. Browse to `http://<force-ip>:8308/` for the web GUI (always running
