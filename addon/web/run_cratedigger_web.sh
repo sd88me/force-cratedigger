@@ -29,6 +29,6 @@ if [ "$1" = "kill" ]; then
     fi
 else
     cd "$APPDIR" || exit 1
-    python3 server.py --port 8305 --ctrl-sock /tmp/cratedigger_ctrl.sock >/tmp/cratedigger_web.log 2>&1 &
+    python3 server.py --port 8308 --ctrl-sock /tmp/cratedigger_ctrl.sock >/tmp/cratedigger_web.log 2>&1 &
     echo $! > "$PIDFILE"
 fi

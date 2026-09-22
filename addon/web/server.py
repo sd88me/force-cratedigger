@@ -185,7 +185,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global CTRL_SOCK
-    port = 8305  # after force-acid's 8303, force-maze's 8304 — see gotchas.md on port collisions
+    port = 8308  # 8303 acid, 8304 maze-voice, 8305 maze-seq, 8306 jv880, 8307 dx7 - confirmed live on device, see gotchas.md on port collisions
     args = sys.argv[1:]
     if "--port" in args:
         port = int(args[args.index("--port") + 1])

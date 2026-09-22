@@ -36,5 +36,5 @@ if [ "$mode" = "ENABLE" ]; then
     cp -f "$installroot/run_$appname.sh" "$runScript"
     "$runScript"
     echo "$appTitle enabled for Auto Launch"
-    echo "Browse to http://<force-ip>:8305/ (Shift+info on the WiFi screen for the IP)."
+    echo "Browse to http://<force-ip>:8308/ (Shift+info on the WiFi screen for the IP)."
 fi

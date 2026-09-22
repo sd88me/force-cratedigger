@@ -34,8 +34,11 @@
  * comments for the fuller writeup of why a fixed cadence drifts under
  * scheduler jitter on a shared, non-RT thread.
  *
- * Build: see scripts/build.sh (native armhf under QEMU, links -lpthread,
- * same toolchain as force-maze/force-acid — no -lasound needed here).
+ * Build: see scripts/build.sh (native armhf under QEMU, links -lpthread
+ * -lrt — the shm_open/shm_unlink calls need -lrt on this target's older
+ * glibc even though a modern host glibc folds them into libc and links
+ * fine without it, confirmed the hard way on the first real build — same
+ * toolchain as force-maze/force-acid otherwise, no -lasound needed here).
  */
 
 #include <atomic>

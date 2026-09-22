@@ -33,7 +33,7 @@ docker run --rm --platform "$PLATFORM" \
   # #defines noted at the top of src/dsp/yt_stream_plugin.c. -Isrc/include
   # resolves its own #include "plugin_api_v1.h" (upstream keeps that header
   # next to the .c file; here it lives in src/include/, shared with the
-  # host shim's own include of it).
+  # host shim'\''s own include of it).
   # No -std= override, matching upstream schwung-webstream'\''s own build.sh
   # invocation exactly: GCC'\''s default GNU dialect implicitly defines
   # _DEFAULT_SOURCE, exposing fdopen/popen/strtok_r/kill/usleep without extra
@@ -44,7 +44,7 @@ docker run --rm --platform "$PLATFORM" \
   g++ $COMMON -std=c++14 -c src/cratedigger_host.cpp      -o obj/cratedigger_host.o
 
   g++ obj/yt_stream_plugin.o obj/cratedigger_host.o \
-      -lpthread \
+      -lpthread -lrt \
       -o dist/cratedigger_host
 
   strip dist/cratedigger_host

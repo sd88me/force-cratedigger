@@ -225,7 +225,7 @@ Then, separately:
    button on the shadow page — it does **not** auto-launch at boot (see
    `addon/NSMODULE.json`'s `AUTOLAUNCHABLE: false` and the comment in
    `addon/manage.sh`).
-3. Browse to `http://<force-ip>:8305/` for the web GUI (always running
+3. Browse to `http://<force-ip>:8308/` for the web GUI (always running
    once its own addon is enabled, independent of whether the engine is
    started — every control there just answers "engine not running" until
    `cratedigger_host`'s socket exists).
