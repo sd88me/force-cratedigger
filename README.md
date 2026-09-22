@@ -16,6 +16,22 @@ All credit for the DSP core, the Discogs search/resolve/streaming
 pipeline, and the whole yt-dlp/ffmpeg-backed design goes to that project —
 see [Credit & what's actually new here](#credit--whats-actually-new-here).
 
+## Screenshots
+
+Shadow GUI (Force Shadow companion page), rendered offline from the real
+`shadow_page.conf` via `force-shadow/tools/render_conf_preview.c` — see
+[How it works](#how-it-works-for-anyone-extending-this) for why that
+tool, not a live device, is the source of truth for these:
+
+| PLAY | FILTERS |
+|---|---|
+| ![PLAY tab](docs/previews/shadow_play.png) | ![FILTERS tab](docs/previews/shadow_filters.png) |
+
+The web GUI (`addon/web/index.html`) has no offline screenshot here —
+this repo was built in an environment with no headless browser available
+to capture one. It's plain, dependency-free HTML/CSS/JS; open it in any
+browser to see it, or read the file directly.
+
 ## What you get
 
 - **Engine** (`cratedigger_host`): a native armhf process that links the
@@ -267,6 +283,20 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
   dig-focused browser web GUI and vintage-MPC theme (`addon/web/`), the
   shadow GUI page and its own take on the same theme
   (`addon/shadow_page.conf`), and all build/deploy/addon-manager scripts.
+
+## Releases
+
+Not tagged yet (current version: `0.2.0` in `addon/module.json`). The
+sibling repos this one was built alongside (`force-shadow`, `force-dx7`,
+`force-maze`, `force-audioin`) tag releases as `gh release create <tag>
+--target <branch> --title … --notes …`, one version scheme per repo (e.g.
+`force-shadow` uses `v1.0.0`, `force-maze` tags per-module like
+`maze-voice-v1.0.0`) — see that convention (and the rest of the build →
+test → deploy → release loop these repos share) in this environment's
+`force-device-workflow` skill. This repo would follow the same plain
+`vX.Y.Z` scheme once it's had a real device test pass (see
+[Known limitations](#known-limitations-differences-from-the-move-original)) —
+premature before that.
 
 Third-party, unsupported community addon. Not affiliated with or endorsed
 by Akai, InMusic, Ableton, Charles Vestal, or Discogs. Users are
