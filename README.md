@@ -78,16 +78,22 @@ browser to see it, or read the file directly.
   `skipbackHost.c` (force-audioin repo) checks that file before falling
   back to its usual Force-project-name/tempo lookup, so a skipback
   recording taken while a track is playing is named after the track
-  instead of the current Force project. In practice today this only
-  ever replaces the *name*, not the *tempo*: Discogs — crate-dig's only
-  real data source right now — has no BPM field on a release at all
-  (confirmed directly in `src/bin/yt_dlp_daemon.py`'s `cratedig_search()`,
-  which sends an empty tempo field unconditionally), so the real Force
-  project tempo is what ends up in the filename regardless. The lookup
-  is still wired end-to-end and reads the real field rather than
-  assuming it's empty, so this starts working automatically the day a
-  tempo source is added for crate-dig results — no change needed on
-  this side then.
+  instead of the current Force project — and, if the data source
+  actually has a tempo for that track, its own tempo instead of the
+  Force project's tempo. Discogs — crate-dig's only real data source
+  right now — has no BPM field on a release at all (confirmed directly
+  in `src/bin/yt_dlp_daemon.py`'s `cratedig_search()`, which sends an
+  empty tempo field unconditionally), so in practice this only replaces
+  the *name* today, never the *tempo*. Deliberately **not** falling back
+  to the Force project's own tempo in that case — the project tempo is
+  the sequencer's, unrelated to whatever external track is actually
+  playing, and printing it in the filename would misrepresent the
+  recording as being at that tempo — so a crate-dig-triggered skipback
+  recording with no real track tempo just has no bpm segment in its
+  filename at all. The lookup is still wired end-to-end and reads the
+  real field rather than assuming it's empty, so a track tempo starts
+  appearing automatically the day one's added for crate-dig results — no
+  change needed on this side then.
 
 ## How it works (for anyone extending this)
 
