@@ -94,11 +94,15 @@ own header comment. In short:
 ## Theme
 
 `style=td3` (rounded frames, pill buttons, pill engine button — a shape
-mode) plus a `theme_*` palette pulled from a real Akai MPC60 photo:
-greige chassis, navy blue for the active/selected state (matching the
-MPC60's data-entry keypad), cream knob/button text, MPC red for action
-buttons, and a complementary blue for readout/accent text — a deliberate
-departure from the MPC60's own green LCD. `style=td3` and the colors are
+mode) plus an achromatic palette inspired by a real Akai MPC60 photo, no
+color hue anywhere except the MPC-red action buttons: a charcoal page
+background, greige boxes/top bar/bottom bar, and the same dark grey
+already used for the top-bar title and tab labels for every other bit of
+text and highlight. Selected/active states (a chosen filter, the active
+tab, a selected result) invert that relationship locally — charcoal fill
+with cream text, or cream fill with charcoal text — instead of
+introducing a new hue (earlier iterations tried navy blue, then a lighter
+complementary blue, before landing here). `style=td3` and the colors are
 independent knobs — see `addon/shadow_page.conf`'s own top-of-file
 comment. The web GUI (`addon/web/index.html`) uses matching CSS tokens
 for visual consistency between the two surfaces.
