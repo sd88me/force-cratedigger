@@ -112,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
                 "stream_status", "playback_time", "gain", "stream_url",
                 "stream_provider", "search_status", "search_count",
                 "search_error", "download_status", "download_path",
-                "download_error",
+                "download_error", "skipback_status",
             ]
             out = {}
             for k in keys:

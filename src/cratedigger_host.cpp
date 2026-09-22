@@ -39,6 +39,7 @@
  */
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -53,8 +54,11 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #include "include/plugin_api_v1.h"
 #include "forceAudioInject.h"
@@ -76,6 +80,29 @@ static std::string g_module_json;      /* raw module.json, served for DESCRIBE *
 static std::string g_ctrl_sock_path = "/tmp/cratedigger_ctrl.sock";
 static bool         g_verbose = false;
 static unsigned     g_mix_slot = 0;    /* which /forceAudioInjectN this instance owns */
+
+/* Skipback (force-audioin's "Force Audio Jack - Skipback" addon,
+ * skipbackHost) is a separate companion process, not something this
+ * addon owns or spawns directly — see the SKIPBACK REC button's own
+ * comment further down for why toggling it goes through nodeServer's
+ * moduler endpoint exactly the way Force Shadow's own engine on/off
+ * button does, rather than this process fork/exec-ing it itself. Same
+ * per-device mmPath problem every other NSMODULE path in this project
+ * has (see README.md) — override with --skipback-nsmodule-path. */
+static std::string g_skipback_nsmodule_path =
+    "/media/CHANGE_ME/AddOns/ForceAudioJackSkipback/NSMODULE.json";
+static const char *SKIPBACK_PROCESSNAME = "skipbackHost";
+static const char *SKIPBACK_DIRNAME = "ForceAudioJackSkipback";
+/* Verbatim from that addon's own NSMODULE.json ARGUMENTS array — must be
+ * kept byte-for-byte in sync with it by hand (same fragility Force
+ * Shadow's own engine_arguments_json has, see shadow_page.conf's
+ * comment on that) since nodeServer's moduler endpoint overwrites the
+ * real NSMODULE.json with whatever ARGUMENTS this sends. */
+static const char *SKIPBACK_ARGUMENTS_JSON =
+    "[{\"NAME\":\"window flag\",\"VALUE\":\"--window-sec\"},"
+    "{\"NAME\":\"rolling window seconds (max 60)\",\"VALUE\":\"30\"},"
+    "{\"NAME\":\"output-dir flag\",\"VALUE\":\"--output-dir\"},"
+    "{\"NAME\":\"output folder\",\"VALUE\":\"/sdcard/Force Documents/Samples/Skipback\"}]";
 
 /* ---------------------------------------------------------------------------
  * Shared-memory ring setup (producer side) — identical in shape to
@@ -254,6 +281,14 @@ static void timer_loop() {
  *    lowercase words that would render the same way search results did
  *    before the fix above. playback_time is exempt (digits + ':' only,
  *    already safe) so its readout uses the plain key directly.
+ *  - "skipback_toggle" (SET, any value) / "skipback_running" (GET, "1"/
+ *    "0") / "skipback_status" (GET, "RECORDING"/"STOPPED" - already
+ *    upper-case ASCII, so this one key serves both GUIs, no "_shadow"
+ *    variant needed) — start/stop force-audioin's separate skipbackHost
+ *    process via nodeServer's /moduler/UPDATE endpoint, the same
+ *    mechanism Force Shadow's own engine on/off button uses. See
+ *    send_skipback_toggle()'s own comment for why this goes through
+ *    nodeServer rather than this process spawning skipbackHost itself.
  * ------------------------------------------------------------------------- */
 static bool handle_mix_set(const std::string &key, const std::string &val) {
     if (key == "mix.enabled") {
@@ -291,6 +326,73 @@ static bool handle_mix_get(const std::string &key, std::string &out) {
         return true;
     }
     return false;
+}
+
+/* ---------------------------------------------------------------------------
+ * Skipback toggle — start/stop force-audioin's separate skipbackHost
+ * process (continuous rolling-buffer recording of the Force's real main
+ * mix, flushed to WAV on a SHIFT+RECORD MidiLoop shortcut — see that
+ * project's docs/PROPOSAL-force-audio-jack.md). Not this addon's own
+ * process and not something this addon spawns directly — same reasoning
+ * Force Shadow's own engine on/off button uses for why (see that
+ * button's own comment in force_shadow.c): firing a plain HTTP POST to
+ * nodeServer's already-running /moduler/UPDATE endpoint (the same one
+ * the on-device Modules page itself uses) is a bounded, ordinary socket
+ * call, whereas fork()/exec()-ing a companion process ourselves would be
+ * reinventing process-lifecycle bookkeeping nodeServer already owns.
+ * Checks the real process list (not an internal flag we could drift out
+ * of sync with — e.g. if someone toggles it from the Modules page
+ * directly) via `pgrep -x` before each toggle, so this is always acting
+ * on the true current state.
+ * ------------------------------------------------------------------------- */
+static bool skipback_is_running() {
+    std::string cmd = std::string("pgrep -x ") + SKIPBACK_PROCESSNAME + " >/dev/null 2>&1";
+    return std::system(cmd.c_str()) == 0;
+}
+
+static void send_skipback_toggle(bool want_running) {
+    char body[1024];
+    int blen = std::snprintf(body, sizeof(body),
+        "{\"CONFIGFILE\":\"%s\",\"PROCESSNAME\":\"%s\",\"DIRNAME\":\"%s\","
+        "\"ARGUMENTS\":%s,\"RUNNING\":%s}",
+        g_skipback_nsmodule_path.c_str(), SKIPBACK_PROCESSNAME, SKIPBACK_DIRNAME,
+        SKIPBACK_ARGUMENTS_JSON, want_running ? "true" : "false");
+    if (blen < 0 || (size_t)blen >= sizeof(body)) {
+        fprintf(stderr, "[cratedigger] skipback_toggle: JSON body build failed/truncated\n");
+        return;
+    }
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) { perror("[cratedigger] skipback_toggle: socket"); return; }
+    struct timeval tv = { 1, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8080);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+        char req[1536];
+        int rlen = std::snprintf(req, sizeof(req),
+            "POST /moduler/UPDATE HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: %d\r\n"
+            "Connection: close\r\n"
+            "\r\n%s",
+            blen, body);
+        if (rlen > 0 && (size_t)rlen < sizeof(req)) {
+            send(fd, req, (size_t)rlen, MSG_NOSIGNAL);
+            if (g_verbose) fprintf(stderr, "[cratedigger] skipback_toggle: sent RUNNING=%s\n",
+                                    want_running ? "true" : "false");
+        }
+    } else {
+        fprintf(stderr, "[cratedigger] skipback_toggle: connect to nodeServer failed: %s\n", strerror(errno));
+    }
+    close(fd);
 }
 
 /* Must be called with g_lock already held. */
@@ -648,6 +750,12 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             send(fd, "OK\n", 3, 0);
             return;
         }
+        if (!strcmp(key, "skipback_toggle")) {
+            bool now_running = skipback_is_running();
+            send_skipback_toggle(!now_running);
+            send(fd, "OK\n", 3, 0);
+            return;
+        }
         std::lock_guard<std::mutex> lk(g_lock);
         g_api->set_param(g_inst, key, val);
         send(fd, "OK\n", 3, 0);
@@ -760,6 +868,19 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
+        if (!strcmp(key, "skipback_running")) {
+            std::string reply = std::string(skipback_is_running() ? "1" : "0") + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "skipback_status")) {
+            /* Already upper-case ASCII-only, so this one string works
+             * unmodified for both the web GUI and (via this exact key,
+             * no separate "_shadow" variant needed) Force Shadow's font. */
+            std::string reply = std::string(skipback_is_running() ? "RECORDING" : "STOPPED") + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
         /* Generic "<real key>_shadow" convention: strip the suffix, fetch
          * the real value (core or mix.*), and run it through
          * shadow_font_safe() before returning. Exists because most of the
@@ -849,6 +970,10 @@ static void usage(const char *me) {
         "  --module-dir PATH     dir containing module.json, bin/yt-dlp,\n"
         "                        bin/yt_dlp_daemon.py, bin/ffmpeg (default: .)\n"
         "  --ctrl-sock PATH      control socket path (default: /tmp/cratedigger_ctrl.sock)\n"
+        "  --skipback-nsmodule-path PATH\n"
+        "                        path to ForceAudioJackSkipback's own NSMODULE.json,\n"
+        "                        for the SKIPBACK REC button (default: a CHANGE_ME\n"
+        "                        placeholder - see README.md)\n"
         "  --mix-slot N          voice slot 0..%d for forceAudioIn.so (default: 0) -\n"
         "                        each simultaneous voice needs a distinct slot\n",
         me, AI_MAX_VOICES - 1);
@@ -873,6 +998,7 @@ int main(int argc, char **argv) {
         if      (a == "-v")                        g_verbose = true;
         else if (a == "--module-dir" && i+1 < argc) module_dir = argv[++i];
         else if (a == "--ctrl-sock"  && i+1 < argc) g_ctrl_sock_path = argv[++i];
+        else if (a == "--skipback-nsmodule-path" && i+1 < argc) g_skipback_nsmodule_path = argv[++i];
         else if (a == "--mix-slot" && i+1 < argc) {
             int s = std::atoi(argv[++i]);
             if (s < 0 || s >= AI_MAX_VOICES) { usage(argv[0]); return 2; }

@@ -29,18 +29,31 @@ see [Credit & what's actually new here](#credit--whats-actually-new-here).
 - **Web GUI** (`addon/web/`): cascading Genre → Style and Region → Country
   dropdowns plus a Decade dropdown, a dedicated **Search Discogs** button
   (nothing searches until you press it), a results list, transport
-  control (play/pause, ±15s seek, stop, restart), gain, and download to
-  WAV.
+  control (play/pause, ±15s seek, stop, restart), gain, download to WAV,
+  and a **Skipback Rec** button (see below).
 - **Shadow GUI** (`addon/shadow_page.conf`): a `style=td3` page themed
   after a vintage Akai MPC60 — `SHIFT+SCENE-6` opens it directly on the
   Force's own touchscreen, two tabs:
-  - **PLAY** — transport, output gain/routing, engine on/off, a results
-    list (tap to play), and its own **SEARCH** button so a filter set on
-    the FILTERS tab can be re-run without switching tabs.
+  - **PLAY** — transport, output gain/routing, engine on/off, a
+    **Skipback Rec** button, a results list (tap to play), and its own
+    **SEARCH** button so a filter set on the FILTERS tab can be re-run
+    without switching tabs.
   - **FILTERS** — five steppers (Genre, Style, Decade, Region, Country —
     Style depends on the current Genre, Country on the current Region)
     and a dedicated **SEARCH DISCOGS** button, same "nothing searches
     until you press it" behavior as the web GUI.
+- **Skipback Rec**: a red button (both GUIs) that starts/stops
+  [force-audioin](https://github.com/sd88me/force-audioin)'s separate
+  `skipbackHost` process — continuous rolling-buffer recording of the
+  Force's real main mix, so a `SHIFT+RECORD` shortcut can save the last
+  N seconds retroactively. This addon doesn't run or own that process;
+  the button fires the same nodeServer `/moduler/UPDATE` start/stop
+  call the on-device Modules page itself uses (see
+  `cratedigger_host.cpp`'s `send_skipback_toggle()`). Requires
+  force-audioin's Force Audio Jack feature to actually be installed and
+  its own tap armed — this button only starts/stops `skipbackHost`
+  itself, same "toggling here doesn't arm the underlying tap" caveat
+  ForceAudioJackSkipback's own `NSMODULE.json` states.
 
 ## How it works (for anyone extending this)
 
@@ -136,18 +149,21 @@ Or by hand: `scp -r dist/ForceCrateDigger root@<force-ip>:<mmPath>/AddOns/ForceC
 
 ## Required per-device edits before enabling
 
-Two files hardcode an absolute path to this addon's own install location —
-`/media/CHANGE_ME/AddOns/ForceCrateDigger` — because MockbaMod addon paths
-are genuinely per-device (the SD card's mount point varies), not something
-a build step can know in advance. This is the same situation
-force-maze/ForceMazeVoice's own `NSMODULE.json` is in. **Before enabling,
-edit both to your real path** (SSH in, `cat /dev/shm/.mmPath`, then
-`<that>/AddOns/ForceCrateDigger`):
+Two files hardcode absolute paths to addon install locations —
+`/media/CHANGE_ME/AddOns/ForceCrateDigger` and (for the Skipback Rec
+button) `/media/CHANGE_ME/AddOns/ForceAudioJackSkipback/NSMODULE.json` —
+because MockbaMod addon paths are genuinely per-device (the SD card's
+mount point varies), not something a build step can know in advance.
+This is the same situation force-maze/ForceMazeVoice's own
+`NSMODULE.json` is in. **Before enabling, edit every occurrence to your
+real path** (SSH in, `cat /dev/shm/.mmPath`, then
+`<that>/AddOns/ForceCrateDigger` / `<that>/AddOns/ForceAudioJackSkipback`):
 
-- `addon/NSMODULE.json` → the `ARGUMENTS` entry with `NAME` containing
-  "EDIT to your device's real mmPath"
+- `addon/NSMODULE.json` → the two `ARGUMENTS` entries with `NAME`
+  containing "EDIT to your device's real mmPath" (one for this addon's
+  own module dir, one for Skipback's NSMODULE.json path)
 - `addon/shadow_page.conf` → `engine_nsmodule_path` and the matching
-  entry inside `engine_arguments_json` (these two **must stay byte-for-
+  entries inside `engine_arguments_json` (these two **must stay byte-for-
   byte identical** — Force Shadow's engine on/off button re-sends
   `engine_arguments_json` verbatim to nodeServer, so a stale copy would
   silently corrupt the real `NSMODULE.json` on next toggle)
