@@ -290,11 +290,13 @@ static void timer_loop() {
  *    send_skipback_toggle()'s own comment for why this goes through
  *    nodeServer rather than this process spawning skipbackHost itself.
  *    Playing a result (play_result_index above) also writes the track's
- *    title/channel to /tmp/force_nowplaying.txt — see
- *    write_nowplaying_file()'s own comment — so a skipback recording
- *    taken while a track is playing gets named after it instead of the
- *    Force project name (skipbackHost.c change, force-audioin repo,
- *    not this one). Cleared on "stop"/"stop_step" and on exit.
+ *    title/channel, and its tempo if the source actually has one (see
+ *    write_nowplaying_file()'s own comment — Discogs itself never does,
+ *    for what it's worth), to /tmp/force_nowplaying.txt, so a skipback
+ *    recording taken while a track is playing gets named after it
+ *    instead of the Force project name/tempo (skipbackHost.c change,
+ *    force-audioin repo, not this one). Cleared on "stop"/"stop_step"
+ *    and on exit.
  * ------------------------------------------------------------------------- */
 static bool handle_mix_set(const std::string &key, const std::string &val) {
     if (key == "mix.enabled") {
@@ -623,21 +625,39 @@ static std::string build_search_results_json_locked(bool shadow_safe) {
 
 /* Generic "now playing" file force-audioin's skipbackHost.c reads (added
  * there for this — see that repo's own commit) to name a skipback
- * recording after the actual track instead of the Force project name;
- * tempo in the filename stays the real project tempo either way,
- * skipbackHost's own lookup, untouched. Not cratedigger-specific by
- * convention — any addon that knows what's actually playing can write
- * here — but this is the only writer that currently exists. Cleared on
- * stop so a later non-cratedigger skipback recording (or a stale
- * cratedigger session) doesn't get mislabeled with an old title; also
- * self-expires after 10 minutes on skipbackHost's own side regardless. */
+ * recording after the actual track instead of the Force project name,
+ * and its own tempo instead of the real project tempo WHEN one is
+ * actually available (line 2, optional — see write_nowplaying_file()).
+ * Not cratedigger-specific by convention — any addon that knows what's
+ * actually playing can write here — but this is the only writer that
+ * currently exists. Cleared on stop so a later non-cratedigger skipback
+ * recording (or a stale cratedigger session) doesn't get mislabeled with
+ * an old title; also self-expires after 10 minutes on skipbackHost's own
+ * side regardless. */
 static const char *NOWPLAYING_PATH = "/tmp/force_nowplaying.txt";
 
-static void write_nowplaying_file(const std::string &text) {
+/* `tempo_bpm` is the track's own tempo if the source actually has one —
+ * empty/omit it otherwise, which leaves skipbackHost's real project
+ * tempo in place. As of this writing, force-cratedigger's own results
+ * never pass one: Discogs (crate-dig's actual data source, see
+ * search_result_provider_<n>/handle_play_result_index_locked's own
+ * lookups) has no BPM field on a release at all — confirmed directly in
+ * src/bin/yt_dlp_daemon.py's cratedig_search(), which sends "" for the
+ * tempo field unconditionally (the SAMPLETTE_TEMPOS-style AcousticBrainz
+ * tempo lookup a few lines above it only runs for a different, unused-
+ * here provider). search_result_tempo_<n> is read anyway rather than
+ * hardcoding an empty string here, so this starts working automatically
+ * if a future daemon change ever populates it for crate-dig results
+ * specifically, with zero change needed on this side. */
+static void write_nowplaying_file(const std::string &title, const std::string &tempo_bpm) {
     FILE *f = fopen(NOWPLAYING_PATH, "w");
     if (!f) return;
-    fputs(text.c_str(), f);
+    fputs(title.c_str(), f);
     fputc('\n', f);
+    if (!tempo_bpm.empty()) {
+        fputs(tempo_bpm.c_str(), f);
+        fputc('\n', f);
+    }
     fclose(f);
 }
 static void clear_nowplaying_file() { unlink(NOWPLAYING_PATH); }
@@ -663,6 +683,14 @@ static bool handle_play_result_index_locked(int idx, std::string &err) {
     n = g_api->get_param(g_inst, key, buf, sizeof(buf));
     std::string channel = (n > 0) ? std::string(buf, n) : std::string();
 
+    /* Almost always empty for crate-dig results today — see
+     * write_nowplaying_file()'s own comment for exactly why — but read
+     * for real rather than assumed, so this just works the day that
+     * changes. */
+    std::snprintf(key, sizeof(key), "search_result_tempo_%d", idx);
+    n = g_api->get_param(g_inst, key, buf, sizeof(buf));
+    std::string tempo = (n > 0) ? std::string(buf, n) : std::string();
+
     g_api->set_param(g_inst, "stream_provider", provider.c_str());
     g_api->set_param(g_inst, "stream_url", url.c_str());
     /* Not cratedig-specific despite the name — the core's own next_track_step
@@ -677,7 +705,7 @@ static bool handle_play_result_index_locked(int idx, std::string &err) {
     if (!title.empty()) {
         std::string nowplaying = title;
         if (!channel.empty()) nowplaying += " - " + channel;
-        write_nowplaying_file(nowplaying);
+        write_nowplaying_file(nowplaying, tempo);
     }
     return true;
 }

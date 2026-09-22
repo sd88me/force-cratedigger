@@ -71,6 +71,24 @@ browser to see it, or read the file directly.
   itself, same "toggling here doesn't arm the underlying tap" caveat
   ForceAudioJackSkipback's own `NSMODULE.json` states.
 
+  Whenever this addon plays a search result, it writes the track's
+  title (and channel) — plus its tempo, *if the data source actually
+  has one for that track* — to `/tmp/force_nowplaying.txt`, a generic
+  "now playing" convention any addon could use. A patched
+  `skipbackHost.c` (force-audioin repo) checks that file before falling
+  back to its usual Force-project-name/tempo lookup, so a skipback
+  recording taken while a track is playing is named after the track
+  instead of the current Force project. In practice today this only
+  ever replaces the *name*, not the *tempo*: Discogs — crate-dig's only
+  real data source right now — has no BPM field on a release at all
+  (confirmed directly in `src/bin/yt_dlp_daemon.py`'s `cratedig_search()`,
+  which sends an empty tempo field unconditionally), so the real Force
+  project tempo is what ends up in the filename regardless. The lookup
+  is still wired end-to-end and reads the real field rather than
+  assuming it's empty, so this starts working automatically the day a
+  tempo source is added for crate-dig results — no change needed on
+  this side then.
+
 ## How it works (for anyone extending this)
 
 Same "port the host, not the DSP" pattern as this device's other Schwung
