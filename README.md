@@ -94,15 +94,20 @@ own header comment. In short:
 ## Theme
 
 `style=td3` (rounded frames, pill buttons, pill engine button — a shape
-mode) plus an achromatic palette inspired by a real Akai MPC60 photo, no
-color hue anywhere except the MPC-red action buttons: a charcoal page
-background, greige boxes/top bar/bottom bar, and the same dark grey
-already used for the top-bar title and tab labels for every other bit of
-text and highlight. Selected/active states (a chosen filter, the active
-tab, a selected result) invert that relationship locally — charcoal fill
-with cream text, or cream fill with charcoal text — instead of
-introducing a new hue (earlier iterations tried navy blue, then a lighter
-complementary blue, before landing here). `style=td3` and the colors are
+mode) plus a mostly-achromatic palette inspired by a real Akai MPC60
+photo: a charcoal page background, greige boxes/top bar/bottom bar, and
+the same dark grey already used for the top-bar title and tab labels for
+body text and frame titles. Navy blue is reserved for the handful of
+things a player actually interacts with — knob pointers, the engine
+on/off pill when running, the active tab, the CHANNEL selector's active
+segment, and the Search button specifically (every other button stays
+MPC red) — added via two small, additive changes to `force-shadow`'s own
+renderer (`theme_knob_dot`, a new theme field independent of `accent` so
+the knob dot could go blue without every other accent-colored text
+following it; and a per-`button` `color=` override, since force_shadow.c
+previously had one global button color for the whole page). The web
+GUI's CSS mirrors the same split. Selected list rows still invert to a
+plain dark-grey/cream pair, no blue. `style=td3` and the colors are
 independent knobs — see `addon/shadow_page.conf`'s own top-of-file
 comment. The web GUI (`addon/web/index.html`) uses matching CSS tokens
 for visual consistency between the two surfaces.

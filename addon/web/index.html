@@ -11,13 +11,18 @@
        anywhere except the MPC-red action buttons. Text/highlights reuse
        the same dark grey the top bar and status pill already use;
        selected/active states invert locally (charcoal fill + cream text,
-       or cream fill + charcoal text) instead of introducing a new hue. */
+       or cream fill + charcoal text) instead of introducing a new hue.
+       One exception: navy blue is back, but only on the handful of
+       things a player actually interacts with (matching the Force
+       Shadow companion page's own theme_knob_dot/go_on/color= choices) -
+       the gain slider thumb, the engine-live indicator, and the Search
+       Discogs button. Everything else stays grey/greige/red. */
     --bg: #211d17; --panel: #c7c2b0; --panel-hi: #ded8c6; --line: #8f8a78;
     --ink: #2b2822; --ink-dim: #5c5648; --ink-faint: #8a8474;
     --accent: #2b2822; --accent-hi: #2b2822; --red: #b8382b; --red-hi: #cf4433;
-    --cream: #ede8d8;
+    --blue: #2f4a6b; --blue-hi: #3d5f87; --cream: #ede8d8;
     --lcd-bg: #c7c2b0; --lcd-ink: #2b2822;
-    --led-off: #8f8a78; --led-on: var(--accent);
+    --led-off: #8f8a78; --led-on: var(--blue);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--bg); }
@@ -36,8 +41,8 @@
     background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 7px 14px;
   }
   .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--led-off); }
-  .status.live .dot { background: var(--led-on); }
-  .status.live { background: var(--cream); }
+  .status.live .dot { background: var(--led-on); box-shadow: 0 0 6px var(--led-on); }
+  .status.live { color: var(--blue); }
 
   .card { background: var(--lcd-bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
   .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin: 0 0 10px; font-weight: 700; }
@@ -56,8 +61,8 @@
     border-radius: 20px; padding: 10px 16px; font-size: 13px; cursor: pointer; font-weight: 700;
   }
   button:active { background: var(--panel); }
-  button.primary { background: var(--red); border-color: var(--red); color: var(--cream); }
-  button.primary:active { background: var(--red-hi); }
+  button.primary { background: var(--blue); border-color: var(--blue); color: var(--cream); }
+  button.primary:active { background: var(--blue-hi); }
   button:disabled { opacity: 0.4; cursor: default; }
 
   .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -84,7 +89,7 @@
   .time { font-family: ui-monospace, monospace; font-size: 13px; color: var(--lcd-ink); margin-left: auto; }
 
   .gain-row { display: flex; align-items: center; gap: 10px; }
-  input[type=range] { flex: 1; accent-color: var(--ink); }
+  input[type=range] { flex: 1; accent-color: var(--blue); }
   .gain-val { font-family: ui-monospace, monospace; font-size: 12px; width: 42px; text-align: right; color: var(--lcd-ink); }
 
   .msg { font-size: 12px; margin-top: 8px; color: var(--lcd-ink); }
