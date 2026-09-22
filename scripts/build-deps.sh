@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Fetch the runtime dependencies force-webstream needs beyond its own
+# Fetch the runtime dependencies force-cratedigger needs beyond its own
 # compiled binary: yt-dlp and ffmpeg/ffprobe. Adapted from upstream
 # schwung-webstream's scripts/build-deps.sh for the Force's actual
 # architecture (armv7l/armhf — 32-bit, unlike Move's aarch64), which

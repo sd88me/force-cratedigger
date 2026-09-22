@@ -3,13 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Force Webstream</title>
+<title>Force Crate Digger</title>
 <style>
   :root {
-    --bg: #0c0d10; --panel: #15171b; --panel-hi: #1c1f24; --line: #262a31;
-    --ink: #e9ebee; --ink-dim: #9ba1ab; --ink-faint: #5c626c;
-    --accent: #4fb8a6; --accent-hi: #6ed9c6; --warn: #d98a3d; --err: #d9564a;
-    --led-off: #2c3038; --led-on: var(--accent);
+    /* Vintage Akai MPC60: greige chassis, navy data-entry-pad blue for
+       selection, cream buttons/knobs, MPC red for action, dark-olive LCD. */
+    --bg: #c7c2b0; --panel: #b9b3a0; --panel-hi: #ded8c6; --line: #8f8a78;
+    --ink: #2b2822; --ink-dim: #5c5648; --ink-faint: #8a8474;
+    --accent: #6b8a35; --accent-hi: #547028; --red: #b8382b; --red-hi: #cf4433;
+    --navy: #2f4a6b; --navy-hi: #3d5f87; --cream: #ede8d8;
+    --lcd-bg: #16210f; --lcd-ink: #9ab34a;
+    --led-off: #8f8a78; --led-on: var(--accent);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--bg); }
@@ -17,64 +21,69 @@
     font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color: var(--ink); padding: 14px; max-width: 780px; margin: 0 auto;
   }
-  h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.03em; margin: 0 0 2px; }
+  h1 { font-size: 16px; font-weight: 800; letter-spacing: 0.06em; margin: 0 0 2px; }
   .credit { font-size: 11px; color: var(--ink-faint); margin: 0 0 16px; }
   .credit a { color: var(--ink-dim); }
 
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
-  .status { font-family: ui-monospace, "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; }
+  .status {
+    font-family: ui-monospace, "IBM Plex Mono", monospace; font-size: 11px; font-weight: 700;
+    color: var(--cream); display: flex; align-items: center; gap: 7px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 7px 14px;
+  }
   .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--led-off); }
   .status.live .dot { background: var(--led-on); box-shadow: 0 0 6px var(--led-on); }
+  .status.live { background: var(--navy); }
 
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
-  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim); margin: 0 0 10px; }
+  .card { background: var(--lcd-bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin: 0 0 10px; font-weight: 700; }
 
   .row { display: flex; gap: 8px; align-items: center; }
   .row + .row { margin-top: 8px; }
-  select, input[type=text], input[type=search] {
-    background: var(--panel-hi); border: 1px solid var(--line); color: var(--ink);
-    border-radius: 6px; padding: 8px 10px; font-size: 13px; outline: none;
+  select, input[type=text] {
+    background: var(--lcd-bg); border: 1px solid var(--line); color: var(--lcd-ink);
+    border-radius: 6px; padding: 9px 10px; font-size: 13px; outline: none;
+    font-family: ui-monospace, "IBM Plex Mono", monospace;
   }
   select:focus, input:focus { border-color: var(--accent); }
-  input[type=text], input[type=search] { flex: 1; min-width: 0; }
+  select { width: 100%; }
   button {
     background: var(--panel-hi); border: 1px solid var(--line); color: var(--ink);
-    border-radius: 6px; padding: 8px 12px; font-size: 13px; cursor: pointer; font-weight: 600;
+    border-radius: 20px; padding: 10px 16px; font-size: 13px; cursor: pointer; font-weight: 700;
   }
-  button:active { background: #23262c; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #06110e; }
-  button.primary:active { background: var(--accent-hi); }
+  button:active { background: var(--panel); }
+  button.primary { background: var(--red); border-color: var(--red); color: var(--cream); }
+  button.primary:active { background: var(--red-hi); }
   button:disabled { opacity: 0.4; cursor: default; }
 
-  .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .filters input { width: 100%; }
-  .filters label { font-size: 10px; color: var(--ink-faint); display: block; margin-bottom: 3px; }
+  .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .filters label { font-size: 10px; color: var(--ink-faint); display: block; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .filters > div { background: var(--panel); border-radius: 8px; padding: 8px; }
 
   #results { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; }
   .result {
-    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px;
-    border: 1px solid transparent; cursor: pointer; background: var(--panel-hi);
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px;
+    border: 1px solid transparent; cursor: pointer; background: #101a0a;
   }
-  .result:active { background: #23262c; }
-  .result.playing { border-color: var(--accent); }
+  .result:active { background: #1a2712; }
+  .result.playing { border-color: var(--accent); background: #1a2712; }
   .result .idx { font-family: ui-monospace, monospace; font-size: 10px; color: var(--ink-faint); width: 18px; text-align: right; flex-shrink: 0; }
   .result .meta { min-width: 0; flex: 1; }
-  .result .title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .result .sub { font-size: 11px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result .title { font-size: 13px; font-weight: 600; color: var(--lcd-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .empty { color: var(--ink-faint); font-size: 12px; padding: 10px 2px; }
 
   .transport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .transport button { min-width: 44px; }
-  .nowplaying { font-size: 12px; color: var(--ink-dim); margin-bottom: 8px; min-height: 16px; }
-  .nowplaying b { color: var(--ink); }
-  .time { font-family: ui-monospace, monospace; font-size: 12px; color: var(--ink-faint); margin-left: auto; }
+  .nowplaying { font-size: 12px; color: var(--lcd-ink); margin-bottom: 8px; min-height: 16px; font-family: ui-monospace, monospace; }
+  .nowplaying b { color: var(--cream); }
+  .time { font-family: ui-monospace, monospace; font-size: 13px; color: var(--lcd-ink); margin-left: auto; }
 
   .gain-row { display: flex; align-items: center; gap: 10px; }
-  input[type=range] { flex: 1; accent-color: var(--accent); }
-  .gain-val { font-family: ui-monospace, monospace; font-size: 12px; width: 42px; text-align: right; color: var(--ink-dim); }
+  input[type=range] { flex: 1; accent-color: var(--navy); }
+  .gain-val { font-family: ui-monospace, monospace; font-size: 12px; width: 42px; text-align: right; color: var(--lcd-ink); }
 
-  .msg { font-size: 12px; margin-top: 8px; }
-  .msg.err { color: var(--err); }
+  .msg { font-size: 12px; margin-top: 8px; color: var(--lcd-ink); }
+  .msg.err { color: var(--red-hi); }
   .msg.ok { color: var(--accent); }
 </style>
 </head>
@@ -82,8 +91,8 @@
 
 <div class="topbar">
   <div>
-    <h1>FORCE WEBSTREAM</h1>
-    <p class="credit">Port of Charles Vestal's
+    <h1>FORCE CRATE DIGGER</h1>
+    <p class="credit">Random music discovery via Discogs. Built on Charles Vestal's
       <a href="https://github.com/charlesvestal/schwung-webstream" target="_blank" rel="noopener">schwung-webstream</a>
       (MIT) for Akai Force / MockbaMod.</p>
   </div>
@@ -91,41 +100,34 @@
 </div>
 
 <div class="card">
-  <h2>Search</h2>
-  <div class="row">
-    <select id="provider">
-      <option value="youtube">YouTube</option>
-      <option value="soundcloud">SoundCloud</option>
-      <option value="archive">archive.org</option>
-      <option value="freesound">Freesound</option>
-      <option value="cratedig">Crate Dig (Discogs)</option>
-    </select>
-    <input type="search" id="query" placeholder="Search query…">
-    <button class="primary" id="searchBtn">Search</button>
+  <h2>Discogs Filters</h2>
+  <div class="filters">
+    <div><label>Genre</label><select id="cdGenre"></select></div>
+    <div><label>Style</label><select id="cdStyle"></select></div>
+    <div><label>Decade</label><select id="cdDecade"></select></div>
+    <div><label>Region</label><select id="cdRegion"></select></div>
+    <div style="grid-column: 1 / -1;"><label>Country</label><select id="cdCountry"></select></div>
   </div>
-  <div class="row filters" id="cratedigFilters" style="display:none; margin-top:10px;">
-    <div><label>Genre</label><input type="text" id="cdGenre" placeholder="e.g. Electronic"></div>
-    <div><label>Style</label><input type="text" id="cdStyle" placeholder="e.g. Techno"></div>
-    <div><label>Decade</label><input type="text" id="cdDecade" placeholder="e.g. 1990s"></div>
-    <div><label>Country</label><input type="text" id="cdCountry" placeholder="e.g. Germany"></div>
+  <div class="row" style="margin-top:12px;">
+    <button class="primary" id="searchBtn">Search Discogs</button>
+    <span class="msg" id="searchMsg"></span>
   </div>
-  <div class="msg" id="searchMsg"></div>
 </div>
 
 <div class="card">
   <h2>Results</h2>
-  <div id="results"><div class="empty">No search yet.</div></div>
+  <div id="results"><div class="empty">No search yet — pick some filters and dig.</div></div>
 </div>
 
 <div class="card">
   <h2>Now Playing</h2>
   <div class="nowplaying" id="nowPlaying">Nothing selected.</div>
   <div class="transport">
-    <button id="rewindBtn" title="Rewind 15s">« 15</button>
-    <button id="playBtn" title="Play / Pause">▶</button>
-    <button id="forwardBtn" title="Forward 15s">15 »</button>
-    <button id="stopBtn" title="Stop">■</button>
-    <button id="restartBtn" title="Restart from beginning">↺</button>
+    <button id="rewindBtn" title="Rewind 15s">&lt;&lt; 15</button>
+    <button id="playBtn" title="Play / Pause">&#9654;</button>
+    <button id="forwardBtn" title="Forward 15s">15 &gt;&gt;</button>
+    <button id="stopBtn" title="Stop">&#9632;</button>
+    <button id="restartBtn" title="Restart from beginning">&#8634;</button>
     <span class="time" id="playTime">0:00</span>
   </div>
   <div class="row" style="margin-top:10px;">
@@ -143,10 +145,74 @@
 </div>
 
 <script>
+/* Discogs genre/style/decade/region+country tables, ported verbatim from
+ * the original Move on-device UI (schwung-webstream's src/ui.js) — the
+ * same source cratedigger_host.cpp's own C tables were ported from, kept
+ * in sync by hand (see that file's own comment on the same tables). */
+const CRATEDIG_GENRES = [
+  '', 'Blues', 'Brass & Military', "Children's", 'Classical', 'Electronic',
+  'Folk, World, & Country', 'Funk / Soul', 'Hip Hop', 'Jazz', 'Latin',
+  'Non-Music', 'Pop', 'Reggae', 'Rock', 'Stage & Screen',
+];
+const CRATEDIG_STYLES = {
+  '': [''],
+  'Blues': ['', 'Boogie Woogie', 'Chicago Blues', 'Country Blues', 'Delta Blues', 'East Coast Blues', 'Electric Blues', 'Harmonica Blues', 'Jump Blues', 'Louisiana Blues', 'Memphis Blues', 'Modern Electric Blues', 'Piano Blues', 'Piedmont Blues', 'Rhythm & Blues', 'Texas Blues'],
+  'Brass & Military': ['', 'Brass Band', 'Marches', 'Military', 'Pipe & Drum'],
+  "Children's": ['', 'Educational', 'Nursery Rhymes', 'Story'],
+  'Classical': ['', 'Baroque', 'Choral', 'Classical', 'Contemporary', 'Early', 'Impressionist', 'Medieval', 'Modern', 'Neo-Classical', 'Neo-Romantic', 'Opera', 'Operetta', 'Oratorio', 'Post-Modern', 'Renaissance', 'Romantic', 'Serial', 'Twelve-tone', 'Zarzuela'],
+  'Electronic': ['', 'Abstract', 'Acid', 'Acid House', 'Acid Jazz', 'Ambient', 'Ballroom', 'Baltimore Club', 'Bassline', 'Beatdown', 'Berlin-School', 'Big Beat', 'Breakbeat', 'Breakcore', 'Breaks', 'Broken Beat', 'Chillwave', 'Chiptune', 'Dance-pop', 'Dark Ambient', 'Darkwave', 'Deep House', 'Deep Techno', 'Disco', 'Disco Polo', 'Donk', 'Doomcore', 'Downtempo', 'Drone', 'Drum n Bass', 'Dub', 'Dub Techno', 'Dubstep', 'Dungeon Synth', 'EBM', 'Electro', 'Electro House', 'Electroclash', 'Euro House', 'Euro-Disco', 'Eurobeat', 'Eurodance', 'Experimental', 'Freestyle', 'Funkot', 'Future Jazz', 'Gabber', 'Garage House', 'Ghetto', 'Ghetto House', 'Ghettotech', 'Glitch', 'Goa Trance', 'Grime', 'Hands Up', 'Happy Hardcore', 'Hard Beat', 'Hard House', 'Hard Techno', 'Hard Trance', 'Hardcore', 'Hardstyle', 'Harsh Noise Wall', 'Hi NRG', 'Hip Hop', 'Hip-House', 'House', 'IDM', 'Illbient', 'Industrial', 'Italo House', 'Italo-Disco', 'Italodance', 'J-Core', 'Jazzdance', 'Juke', 'Jumpstyle', 'Jungle', 'Latin', 'Leftfield', 'Lento Violento', 'Makina', 'Minimal', 'Minimal Techno', 'Modern Classical', 'Musique Concrète', 'Neo Trance', 'Neofolk', 'Nerdcore Techno', 'New Age', 'New Beat', 'New Wave', 'Noise', 'Nu-Disco', 'Power Electronics', 'Progressive Breaks', 'Progressive House', 'Progressive Trance', 'Psy-Trance', 'Rhythmic Noise', 'Schranz', 'Skweee', 'Sound Collage', 'Speed Garage', 'Speedcore', 'Synth-pop', 'Synthwave', 'Tech House', 'Tech Trance', 'Techno', 'Trance', 'Tribal', 'Tribal House', 'Trip Hop', 'Tropical House', 'UK Funky', 'UK Garage', 'Vaporwave', 'Witch House'],
+  'Folk, World, & Country': ['', 'Aboriginal', 'African', 'Andalusian Classical', 'Appalachian Music', 'Bangladeshi Classical', 'Basque Music', 'Bengali Music', 'Bhangra', 'Bluegrass', 'Cajun', 'Cambodian Classical', 'Canzone Napoletana', 'Carnatic', 'Catalan Music', 'Celtic', 'Chacarera', 'Chamamé', 'Chinese Classical', 'Chutney', 'Cobla', 'Copla', 'Country', 'Dangdut', 'Éntekhno', 'Fado', 'Filk', 'Flamenco', 'Folk', 'Funaná', 'Gagaku', 'Gamelan', 'Gospel', 'Griot', 'Guarania', 'Hawaiian', 'Highlife', 'Hillbilly', 'Hindustani', 'Honky Tonk', 'Indian Classical', 'Jota', 'Kaseko', 'Keroncong', 'Kizomba', 'Klasik', 'Klezmer', 'Korean Court Music', 'Laïkó', 'Lao Music', 'Liscio', 'Luk Krung', 'Luk Thung', 'Maloya', 'Mbalax', "Min'yō", 'Mizrahi', 'Mouth Music', 'Mugham', 'Népzene', 'Nordic', 'Ottoman Classical', 'Overtone Singing', 'Pacific', 'Pasodoble', 'Persian Classical', 'Philippine Classical', 'Phleng Phuea Chiwit', 'Piobaireachd', 'Polka', 'Progressive Bluegrass', 'Raï', 'Rebetiko', 'Romani', 'Rune Singing', 'Salegy', 'Sámi Music', 'Sea Shanties', 'Séga', 'Sephardic', 'Soukous', 'Thai Classical', 'Volksmusik', 'Waiata', 'Western Swing', 'Yemenite Jewish', 'Zamba', 'Zemer Ivri', 'Zouk', 'Zydeco'],
+  'Funk / Soul': ['', 'Afrobeat', 'Bayou Funk', 'Boogie', 'Contemporary R&B', 'Disco', 'Free Funk', 'Funk', 'Gogo', 'Gospel', 'Minneapolis Sound', 'Neo Soul', 'New Jack Swing', 'P.Funk', 'Psychedelic', 'Rhythm & Blues', 'Soul', 'Swingbeat', 'UK Street Soul'],
+  'Hip Hop': ['', 'Bass Music', 'Beatbox', 'Bongo Flava', 'Boom Bap', 'Bounce', 'Britcore', 'Cloud Rap', 'Conscious', 'Crunk', 'Cut-up/DJ', 'DJ Battle Tool', 'Electro', 'Favela Funk', 'G-Funk', 'Gangsta', 'Go-Go', 'Grime', 'Hardcore Hip-Hop', 'Hiplife', 'Horrorcore', 'Hyphy', 'Instrumental', 'Jazzy Hip-Hop', 'Kwaito', 'Miami Bass', 'Motswako', 'Pop Rap', 'Ragga HipHop', 'RnB/Swing', 'Screw', 'Spaza', 'Thug Rap', 'Trap', 'Trip Hop', 'Turntablism'],
+  'Jazz': ['', 'Afro-Cuban Jazz', 'Afrobeat', 'Avant-garde Jazz', 'Big Band', 'Bop', 'Bossa Nova', 'Cape Jazz', 'Contemporary Jazz', 'Cool Jazz', 'Dixieland', 'Easy Listening', 'Free Improvisation', 'Free Jazz', 'Fusion', 'Gypsy Jazz', 'Hard Bop', 'Jazz-Funk', 'Jazz-Rock', 'Latin Jazz', 'Modal', 'Post Bop', 'Ragtime', 'Smooth Jazz', 'Soul-Jazz', 'Space-Age', 'Swing'],
+  'Latin': ['', 'Afro-Cuban', 'Axé', 'Bachata', 'Baião', 'Batucada', 'Beguine', 'Bolero', 'Bomba', 'Boogaloo', 'Bossanova', 'Candombe', 'Carimbó', 'Cha-Cha', 'Champeta', 'Charanga', 'Choro', 'Compas', 'Conjunto', 'Corrido', 'Cuatro', 'Cubano', 'Cumbia', 'Danzon', 'Descarga', 'Forró', 'Gaita', 'Guaguancó', 'Guajira', 'Guaracha', 'Jibaro', 'Joropo', 'Lambada', 'Mambo', 'Marcha Carnavalesca', 'Mariachi', 'Marimba', 'Merengue', 'MPB', 'Musette', 'Música Criolla', 'Norteño', 'Nueva Cancion', 'Nueva Trova', 'Occitan', 'Pachanga', 'Plena', 'Porro', 'Quechua', 'Ranchera', 'Reggaeton', 'Rumba', 'Salsa', 'Samba', 'Samba-Canção', 'Seresta', 'Son', 'Son Montuno', 'Sonero', 'Tango', 'Tejano', 'Timba', 'Trova', 'Vallenato'],
+  'Non-Music': ['', 'Audiobook', 'Comedy', 'Dialogue', 'Education', 'Field Recording', 'Health-Fitness', 'Interview', 'Monolog', 'Movie Effects', 'Poetry', 'Political', 'Promotional', 'Public Broadcast', 'Public Service Announcement', 'Radioplay', 'Religious', 'Sermon', 'Sound Art', 'Sound Poetry', 'Special Effects', 'Speech', 'Spoken Word', 'Technical', 'Therapy'],
+  'Pop': ['', 'Ballad', 'Barbershop', 'Bollywood', 'Break-In', 'Bubblegum', 'Chanson', 'Enka', 'Ethno-pop', 'Europop', 'Indie Pop', 'J-pop', 'K-pop', 'Karaoke', 'Kayōkyoku', 'Levenslied', 'Light Music', 'Music Hall', 'Néo Kyma', 'Novelty', 'Parody', 'Schlager', 'Vocal'],
+  'Reggae': ['', 'Azonto', 'Bubbling', 'Calypso', 'Dancehall', 'Dub', 'Dub Poetry', 'Junkanoo', 'Lovers Rock', 'Mento', 'Ragga', 'Rapso', 'Reggae', 'Reggae Gospel', 'Reggae-Pop', 'Rocksteady', 'Roots Reggae', 'Ska', 'Soca', 'Steel Band'],
+  'Rock': ['', 'Acid Rock', 'Acoustic', 'Alternative Rock', 'AOR', 'Arena Rock', 'Art Rock', 'Atmospheric Black Metal', 'Avantgarde', 'Beat', 'Black Metal', 'Blues Rock', 'Brit Pop', 'Classic Rock', 'Coldwave', 'Country Rock', 'Crust', 'Death Metal', 'Deathcore', 'Deathrock', 'Depressive Black Metal', 'Doo Wop', 'Doom Metal', 'Dream Pop', 'Emo', 'Ethereal', 'Experimental', 'Folk Metal', 'Folk Rock', 'Funeral Doom Metal', 'Funk Metal', 'Garage Rock', 'Glam', 'Goregrind', 'Goth Rock', 'Gothic Metal', 'Grindcore', 'Grunge', 'Hard Rock', 'Hardcore', 'Heavy Metal', 'Horror Rock', 'Indie Rock', 'Industrial', 'Krautrock', 'Lo-Fi', 'Lounge', 'Math Rock', 'Melodic Death Metal', 'Melodic Hardcore', 'Metalcore', 'Mod', 'NDW', 'Neofolk', 'New Wave', 'No Wave', 'Noise', 'Noisecore', 'Nu Metal', 'Oi', 'Parody', 'Pop Punk', 'Pop Rock', 'Pornogrind', 'Post Rock', 'Post-Hardcore', 'Post-Metal', 'Post-Punk', 'Power Metal', 'Power Pop', 'Power Violence', 'Prog Rock', 'Progressive Metal', 'Psychedelic Rock', 'Psychobilly', 'Pub Rock', 'Punk', 'Rock & Roll', 'Rock Opera', 'Rockabilly', 'Shoegaze', 'Ska', 'Skiffle', 'Sludge Metal', 'Soft Rock', 'Southern Rock', 'Space Rock', 'Speed Metal', 'Stoner Rock', 'Surf', 'Swamp Pop', 'Symphonic Rock', 'Technical Death Metal', 'Thrash', 'Twist', 'Viking Metal', 'Yé-Yé'],
+  'Stage & Screen': ['', 'Musical', 'Score', 'Soundtrack', 'Theme'],
+};
+const CRATEDIG_DECADES = ['', '1950s', '1960s', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s'];
+const CRATEDIG_COUNTRIES = [
+  { region: 'Any', countries: [''] },
+  { region: 'Americas', countries: ['Argentina', 'Brazil', 'Canada', 'Chile', 'Colombia', 'Cuba', 'Haiti', 'Jamaica', 'Mexico', 'Peru', 'Puerto Rico', 'Trinidad & Tobago', 'US', 'Venezuela'] },
+  { region: 'Europe', countries: ['Austria', 'Belgium', 'Bulgaria', 'Croatia', 'Czech Republic', 'Denmark', 'Finland', 'France', 'Germany', 'Greece', 'Hungary', 'Iceland', 'Ireland', 'Italy', 'Netherlands', 'Norway', 'Poland', 'Portugal', 'Romania', 'Russia', 'Serbia', 'Spain', 'Sweden', 'Switzerland', 'Turkey', 'UK', 'Ukraine'] },
+  { region: 'Africa', countries: ['Algeria', 'Benin', 'Cameroon', 'Cape Verde', 'Congo', 'Egypt', 'Ethiopia', 'Ghana', 'Guinea', 'Ivory Coast', 'Kenya', 'Mali', 'Morocco', 'Nigeria', 'Senegal', 'South Africa', 'Tanzania', 'Zimbabwe'] },
+  { region: 'Asia', countries: ['China', 'India', 'Indonesia', 'Iran', 'Israel', 'Japan', 'Lebanon', 'Pakistan', 'Philippines', 'South Korea', 'Taiwan', 'Thailand', 'Vietnam'] },
+  { region: 'Oceania', countries: ['Australia', 'New Zealand'] },
+];
+
 const $ = (id) => document.getElementById(id);
 let lastResults = [];
 let currentIndex = -1;
 let searchInFlight = false;
+
+function fillSelect(sel, values, labelFn) {
+  sel.innerHTML = "";
+  values.forEach((v) => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = labelFn ? labelFn(v) : (v || "Any");
+    sel.appendChild(opt);
+  });
+}
+
+function populateGenre() { fillSelect($("cdGenre"), CRATEDIG_GENRES); }
+function populateStyle() {
+  const genre = $("cdGenre").value;
+  fillSelect($("cdStyle"), CRATEDIG_STYLES[genre] || ['']);
+}
+function populateDecade() { fillSelect($("cdDecade"), CRATEDIG_DECADES); }
+function populateRegion() { fillSelect($("cdRegion"), CRATEDIG_COUNTRIES.map((r) => r.region), (v) => v); }
+function populateCountry() {
+  const region = $("cdRegion").value;
+  const entry = CRATEDIG_COUNTRIES.find((r) => r.region === region) || CRATEDIG_COUNTRIES[0];
+  fillSelect($("cdCountry"), entry.countries);
+}
+
+populateGenre(); populateStyle(); populateDecade(); populateRegion(); populateCountry();
+$("cdGenre").addEventListener("change", populateStyle);
+$("cdRegion").addEventListener("change", populateCountry);
 
 async function api(method, path, body) {
   const opts = { method };
@@ -164,31 +230,20 @@ function setMsg(el, text, cls) {
   el.className = "msg" + (cls ? " " + cls : "");
 }
 
-$("provider").addEventListener("change", () => {
-  $("cratedigFilters").style.display = $("provider").value === "cratedig" ? "grid" : "none";
-});
-
 async function doSearch() {
   if (searchInFlight) return;
-  const provider = $("provider").value;
-  const query = $("query").value.trim();
-  if (provider !== "cratedig" && !query) return;
   searchInFlight = true;
   $("searchBtn").disabled = true;
   setMsg($("searchMsg"), "Searching…");
   try {
-    if (provider === "cratedig") {
-      const filter = {
-        genre: $("cdGenre").value.trim(),
-        style: $("cdStyle").value.trim(),
-        decade: $("cdDecade").value.trim(),
-        country: $("cdCountry").value.trim(),
-      };
-      await api("POST", "/param", { key: "cratedig_filter", value: JSON.stringify(filter) });
-    } else {
-      const r = await api("POST", "/search", { provider, query });
-      if (!r.ok) { setMsg($("searchMsg"), "Engine not running.", "err"); searchInFlight = false; $("searchBtn").disabled = false; return; }
-    }
+    const filter = {
+      genre: $("cdGenre").value,
+      style: $("cdStyle").value,
+      decade: $("cdDecade").value,
+      country: $("cdCountry").value,
+    };
+    const r = await api("POST", "/param", { key: "cratedig_filter", value: JSON.stringify(filter) });
+    if (!r.ok) { setMsg($("searchMsg"), "Engine not running.", "err"); searchInFlight = false; $("searchBtn").disabled = false; return; }
     pollUntilSearchDone();
   } catch (e) {
     setMsg($("searchMsg"), "Search failed: " + e, "err");
@@ -241,7 +296,6 @@ async function playResult(i) {
 }
 
 $("searchBtn").addEventListener("click", doSearch);
-$("query").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
 
 $("playBtn").addEventListener("click", () => api("POST", "/param", { key: "play_pause_step", value: "trigger" }));
 $("rewindBtn").addEventListener("click", () => api("POST", "/param", { key: "rewind_15_step", value: "trigger" }));
@@ -250,7 +304,7 @@ $("stopBtn").addEventListener("click", () => api("POST", "/param", { key: "stop_
 $("restartBtn").addEventListener("click", () => api("POST", "/param", { key: "restart_step", value: "trigger" }));
 
 $("downloadBtn").addEventListener("click", async () => {
-  const title = (currentIndex >= 0 && lastResults[currentIndex]) ? lastResults[currentIndex].label : "webstream";
+  const title = (currentIndex >= 0 && lastResults[currentIndex]) ? lastResults[currentIndex].label : "cratedigger";
   setMsg($("downloadMsg"), "Downloading…");
   const r = await api("POST", "/download", { title });
   setMsg($("downloadMsg"), r.ok ? "Started." : "Failed to start.", r.ok ? "ok" : "err");

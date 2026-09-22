@@ -1,7 +1,7 @@
 #!/bin/sh
-appname=webstream_web
-appTitle=Force-Webstream-Web
-appDir=ForceWebstream/web
+appname=cratedigger_web
+appTitle=Force-CrateDigger-Web
+appDir=ForceCrateDigger/web
 
 ################ NO NEED TO EDIT BELOW THIS LINE ###############
 

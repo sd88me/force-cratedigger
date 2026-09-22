@@ -1,4 +1,4 @@
-/* webstream_host.cpp — Force/MockbaMod runtime host for the ported
+/* cratedigger_host.cpp — Force/MockbaMod runtime host for the ported
  * schwung-webstream DSP core (src/dsp/yt_stream_plugin.c, vendored
  * near-verbatim from https://github.com/charlesvestal/schwung-webstream by
  * Charles Vestal, MIT). Plays the role Move's chain host plays, the same
@@ -73,67 +73,9 @@ static ai_shm_t *g_shm = nullptr;
 static std::atomic<uint64_t> g_ring_drops{0};
 
 static std::string g_module_json;      /* raw module.json, served for DESCRIBE */
-static std::string g_ctrl_sock_path = "/tmp/webstream_ctrl.sock";
+static std::string g_ctrl_sock_path = "/tmp/cratedigger_ctrl.sock";
 static bool         g_verbose = false;
 static unsigned     g_mix_slot = 0;    /* which /forceAudioInjectN this instance owns */
-
-/* ---------------------------------------------------------------------------
- * Crate Dig (Discogs) genre/decade pickers, for the shadow GUI's `list`
- * (genre) and `stepper` (decade) widgets — see shadow_page.conf's
- * CRATEDIG tab. There's no on-device keyboard, so unlike the web GUI's
- * free-text genre/style/decade/country fields, the shadow GUI can only
- * choose from a small fixed set here; style/country stay web-GUI-only
- * (see the SET handlers below for the resulting, documented limitation:
- * selecting genre/decade from the shadow GUI sends a filter with EMPTY
- * style/country, so it clobbers whatever those were set to from the web
- * GUI - crate-dig filtering is one UI at a time, not merged state).
- *
- * `label` is what's actually drawn (Force Shadow's font is upper-case-only
- * with almost no punctuation - see shadow_font_safe()'s own comment), kept
- * deliberately separate from `value`, the literal string sent to Discogs
- * via the DSP core's own cratedig_filter protocol (yt_dlp_daemon.py's
- * _build_search_params()) - genre names there are Discogs' own official
- * taxonomy (commas/ampersands and all) and decade values specifically
- * need a lower-case trailing "s" (daemon does `.replace("s", "")|`) so the
- * two must not be the same string.
- * ------------------------------------------------------------------------- */
-struct CratedigOption { const char *label; const char *value; };
-
-static const CratedigOption CRATEDIG_GENRES[] = {
-    { "ANY",                  "" },
-    { "BLUES",                "Blues" },
-    { "BRASS + MILITARY",     "Brass & Military" },
-    { "CHILDRENS",            "Children's" },
-    { "CLASSICAL",            "Classical" },
-    { "ELECTRONIC",           "Electronic" },
-    { "FOLK WORLD COUNTRY",   "Folk, World, & Country" },
-    { "FUNK / SOUL",          "Funk / Soul" },
-    { "HIP HOP",              "Hip Hop" },
-    { "JAZZ",                 "Jazz" },
-    { "LATIN",                "Latin" },
-    { "NON-MUSIC",            "Non-Music" },
-    { "POP",                  "Pop" },
-    { "REGGAE",               "Reggae" },
-    { "ROCK",                 "Rock" },
-    { "STAGE + SCREEN",       "Stage & Screen" },
-};
-static const int N_CRATEDIG_GENRES = (int)(sizeof(CRATEDIG_GENRES) / sizeof(CRATEDIG_GENRES[0]));
-
-static const CratedigOption CRATEDIG_DECADES[] = {
-    { "ANY",   "" },
-    { "1950S", "1950s" },
-    { "1960S", "1960s" },
-    { "1970S", "1970s" },
-    { "1980S", "1980s" },
-    { "1990S", "1990s" },
-    { "2000S", "2000s" },
-    { "2010S", "2010s" },
-    { "2020S", "2020s" },
-};
-static const int N_CRATEDIG_DECADES = (int)(sizeof(CRATEDIG_DECADES) / sizeof(CRATEDIG_DECADES[0]));
-
-static int g_cd_genre_idx = 0;
-static int g_cd_decade_idx = 0;
 
 /* ---------------------------------------------------------------------------
  * Shared-memory ring setup (producer side) — identical in shape to
@@ -235,7 +177,7 @@ static void timer_loop() {
             uint32_t backlog = g_shm ? (uint32_t)((g_shm->head - __atomic_load_n(&g_shm->tail, __ATOMIC_ACQUIRE))
                                                    & (AI_RING_FRAMES - 1))
                                       : 0;
-            fprintf(stderr, "[webstream] render thread: max wake gap %.1fms, %llu/%llu wakes > 9ms, ring drops %llu, "
+            fprintf(stderr, "[cratedigger] render thread: max wake gap %.1fms, %llu/%llu wakes > 9ms, ring drops %llu, "
                             "backlog %u frames\n",
                     g_max_wake_ms.load(),
                     (unsigned long long)g_late_wakes.load(), (unsigned long long)g_total_wakes.load(),
@@ -287,19 +229,24 @@ static void timer_loop() {
  *    This composes those two calls server-side so the shadow page and web
  *    GUI can both just "select result N" without duplicating that
  *    two-step protocol knowledge in two different UIs.
- *  - "cratedig_genre_index" / "cratedig_decade_index" (SET, integer index)
- *    and "cratedig_genre_options_json" / "cratedig_genre_sel" /
- *    "cratedig_decade_text" / "cratedig_decade_idx" / "cratedig_decade_count"
- *    (GET) — the shadow GUI's CRATEDIG tab has no keyboard, so unlike the
- *    web GUI's free-text genre/style/decade/country fields it can only
- *    pick from the small fixed CRATEDIG_GENRES/CRATEDIG_DECADES tables
- *    above (a `list` widget for genre, a `stepper` for decade). Setting
- *    either index composes a cratedig_filter JSON from BOTH current
- *    indices (with style/country always empty) and forwards it to the
- *    core's real "cratedig_filter" key, which is itself what triggers the
- *    actual Discogs search — see send_cratedig_filter_from_shadow_state_
- *    locked()'s own comment for the resulting limitation (shadow-side
- *    filtering clobbers any style/country set from the web GUI).
+ *  - "cratedig_<dim>_index" (SET, integer index) for dim in genre/style/
+ *    decade/region/country, and "cratedig_<dim>_text"/"_idx"/"_count"
+ *    (GET) — five `stepper` widgets on the FILTERS tab (no on-device
+ *    keyboard, so unlike the web GUI's free-text fields the shadow GUI
+ *    can only cycle through fixed lists — CRATEDIG_GENRES/_STYLES/
+ *    _DECADES/_REGIONS/_COUNTRIES above, ported verbatim from the
+ *    original Move on-device UI's own tables). Style depends on the
+ *    current genre selection, country on the current region — selecting
+ *    genre/region resets style/country's index to 0, and their _count
+ *    changes shape accordingly (see cd_current_styles_locked()/
+ *    cd_current_countries_locked()). None of these five SETs touch the
+ *    DSP core at all by themselves — only "cratedig_search_go" (the
+ *    FILTERS tab's dedicated SEARCH button) composes all five current
+ *    selections into the core's real "cratedig_filter" key, which is
+ *    itself what triggers the actual Discogs search. This was originally
+ *    "search on every filter tap"; a dedicated button was requested
+ *    specifically to change that (see send_cratedig_filter_from_shadow_
+ *    state_locked()'s own comment).
  *  - "<key>_shadow" (GET, generic suffix) — strips the suffix, fetches the
  *    real value (core or mix.*), and runs it through shadow_font_safe().
  *    Most of the core's own text status values (stream_status:
@@ -388,6 +335,130 @@ static std::string shadow_font_safe(const std::string &s) {
     return (start == std::string::npos) ? std::string() : out.substr(start);
 }
 
+/* ---------------------------------------------------------------------------
+ * Crate Dig (Discogs) filter data: genre / style (genre-dependent) /
+ * decade / region+country (region narrows country) — for the shadow
+ * GUI's FILTERS tab (five `stepper` widgets) and, indirectly, the web
+ * GUI (which gets the same lists over a GET endpoint — see server.py).
+ *
+ * Ported verbatim from the original Move on-device UI's own tables
+ * (schwung-webstream's src/ui.js: CRATEDIG_GENRES/CRATEDIG_STYLES/
+ * CRATEDIG_DECADES/CRATEDIG_COUNTRIES) — the authoritative real-Discogs-
+ * taxonomy source this project already had, not something reinvented
+ * here. Every array's index 0 is "" (Discogs field omitted = no filter
+ * on that dimension), matching upstream's own "Any" convention.
+ *
+ * Every value here IS the literal string sent to Discogs (commas,
+ * ampersands and all) — there is no separate hand-curated display label
+ * per entry (impractical at ~700 style strings total). shadow_font_safe()
+ * is called on the value at point of use instead; it already does
+ * exactly the uppercase+filter transform needed for Force Shadow's font
+ * and is proven correct (see its own comment) — a style string that
+ * happens to exceed Force Shadow's `list`/`stepper` on-screen width
+ * still filters correctly even if its label is visually truncated.
+ * ------------------------------------------------------------------------- */
+static const char *CRATEDIG_GENRES[] = {
+    "", "Blues", "Brass & Military", "Children's", "Classical", "Electronic",
+    "Folk, World, & Country", "Funk / Soul", "Hip Hop", "Jazz", "Latin",
+    "Non-Music", "Pop", "Reggae", "Rock", "Stage & Screen",
+};
+static const int N_CRATEDIG_GENRES = (int)(sizeof(CRATEDIG_GENRES) / sizeof(CRATEDIG_GENRES[0]));
+
+static const char *STYLES_ANY[] = { "" };
+static const char *STYLES_BLUES[] = { "", "Boogie Woogie", "Chicago Blues", "Country Blues", "Delta Blues", "East Coast Blues", "Electric Blues", "Harmonica Blues", "Jump Blues", "Louisiana Blues", "Memphis Blues", "Modern Electric Blues", "Piano Blues", "Piedmont Blues", "Rhythm & Blues", "Texas Blues" };
+static const char *STYLES_BRASS[] = { "", "Brass Band", "Marches", "Military", "Pipe & Drum" };
+static const char *STYLES_CHILDRENS[] = { "", "Educational", "Nursery Rhymes", "Story" };
+static const char *STYLES_CLASSICAL[] = { "", "Baroque", "Choral", "Classical", "Contemporary", "Early", "Impressionist", "Medieval", "Modern", "Neo-Classical", "Neo-Romantic", "Opera", "Operetta", "Oratorio", "Post-Modern", "Renaissance", "Romantic", "Serial", "Twelve-tone", "Zarzuela" };
+static const char *STYLES_ELECTRONIC[] = { "", "Abstract", "Acid", "Acid House", "Acid Jazz", "Ambient", "Ballroom", "Baltimore Club", "Bassline", "Beatdown", "Berlin-School", "Big Beat", "Breakbeat", "Breakcore", "Breaks", "Broken Beat", "Chillwave", "Chiptune", "Dance-pop", "Dark Ambient", "Darkwave", "Deep House", "Deep Techno", "Disco", "Disco Polo", "Donk", "Doomcore", "Downtempo", "Drone", "Drum n Bass", "Dub", "Dub Techno", "Dubstep", "Dungeon Synth", "EBM", "Electro", "Electro House", "Electroclash", "Euro House", "Euro-Disco", "Eurobeat", "Eurodance", "Experimental", "Freestyle", "Funkot", "Future Jazz", "Gabber", "Garage House", "Ghetto", "Ghetto House", "Ghettotech", "Glitch", "Goa Trance", "Grime", "Hands Up", "Happy Hardcore", "Hard Beat", "Hard House", "Hard Techno", "Hard Trance", "Hardcore", "Hardstyle", "Harsh Noise Wall", "Hi NRG", "Hip Hop", "Hip-House", "House", "IDM", "Illbient", "Industrial", "Italo House", "Italo-Disco", "Italodance", "J-Core", "Jazzdance", "Juke", "Jumpstyle", "Jungle", "Latin", "Leftfield", "Lento Violento", "Makina", "Minimal", "Minimal Techno", "Modern Classical", "Musique Concr\xc3\xa8te", "Neo Trance", "Neofolk", "Nerdcore Techno", "New Age", "New Beat", "New Wave", "Noise", "Nu-Disco", "Power Electronics", "Progressive Breaks", "Progressive House", "Progressive Trance", "Psy-Trance", "Rhythmic Noise", "Schranz", "Skweee", "Sound Collage", "Speed Garage", "Speedcore", "Synth-pop", "Synthwave", "Tech House", "Tech Trance", "Techno", "Trance", "Tribal", "Tribal House", "Trip Hop", "Tropical House", "UK Funky", "UK Garage", "Vaporwave", "Witch House" };
+static const char *STYLES_FOLK[] = { "", "Aboriginal", "African", "Andalusian Classical", "Appalachian Music", "Bangladeshi Classical", "Basque Music", "Bengali Music", "Bhangra", "Bluegrass", "Cajun", "Cambodian Classical", "Canzone Napoletana", "Carnatic", "Catalan Music", "Celtic", "Chacarera", "Chamam\xc3\xa9", "Chinese Classical", "Chutney", "Cobla", "Copla", "Country", "Dangdut", "\xc3\x89ntekhno", "Fado", "Filk", "Flamenco", "Folk", "Funan\xc3\xa1", "Gagaku", "Gamelan", "Gospel", "Griot", "Guarania", "Hawaiian", "Highlife", "Hillbilly", "Hindustani", "Honky Tonk", "Indian Classical", "Jota", "Kaseko", "Keroncong", "Kizomba", "Klasik", "Klezmer", "Korean Court Music", "La\xc3\xafk\xc3\xb3", "Lao Music", "Liscio", "Luk Krung", "Luk Thung", "Maloya", "Mbalax", "Min'y\xc5\x8d", "Mizrahi", "Mouth Music", "Mugham", "N\xc3\xa9pzene", "Nordic", "Ottoman Classical", "Overtone Singing", "Pacific", "Pasodoble", "Persian Classical", "Philippine Classical", "Phleng Phuea Chiwit", "Piobaireachd", "Polka", "Progressive Bluegrass", "Ra\xc3\xaf", "Rebetiko", "Romani", "Rune Singing", "Salegy", "S\xc3\xa1mi Music", "Sea Shanties", "S\xc3\xa9ga", "Sephardic", "Soukous", "Thai Classical", "Volksmusik", "Waiata", "Western Swing", "Yemenite Jewish", "Zamba", "Zemer Ivri", "Zouk", "Zydeco" };
+static const char *STYLES_FUNK[] = { "", "Afrobeat", "Bayou Funk", "Boogie", "Contemporary R&B", "Disco", "Free Funk", "Funk", "Gogo", "Gospel", "Minneapolis Sound", "Neo Soul", "New Jack Swing", "P.Funk", "Psychedelic", "Rhythm & Blues", "Soul", "Swingbeat", "UK Street Soul" };
+static const char *STYLES_HIPHOP[] = { "", "Bass Music", "Beatbox", "Bongo Flava", "Boom Bap", "Bounce", "Britcore", "Cloud Rap", "Conscious", "Crunk", "Cut-up/DJ", "DJ Battle Tool", "Electro", "Favela Funk", "G-Funk", "Gangsta", "Go-Go", "Grime", "Hardcore Hip-Hop", "Hiplife", "Horrorcore", "Hyphy", "Instrumental", "Jazzy Hip-Hop", "Kwaito", "Miami Bass", "Motswako", "Pop Rap", "Ragga HipHop", "RnB/Swing", "Screw", "Spaza", "Thug Rap", "Trap", "Trip Hop", "Turntablism" };
+static const char *STYLES_JAZZ[] = { "", "Afro-Cuban Jazz", "Afrobeat", "Avant-garde Jazz", "Big Band", "Bop", "Bossa Nova", "Cape Jazz", "Contemporary Jazz", "Cool Jazz", "Dixieland", "Easy Listening", "Free Improvisation", "Free Jazz", "Fusion", "Gypsy Jazz", "Hard Bop", "Jazz-Funk", "Jazz-Rock", "Latin Jazz", "Modal", "Post Bop", "Ragtime", "Smooth Jazz", "Soul-Jazz", "Space-Age", "Swing" };
+static const char *STYLES_LATIN[] = { "", "Afro-Cuban", "Ax\xc3\xa9", "Bachata", "Ba\xc3\xa3o", "Batucada", "Beguine", "Bolero", "Bomba", "Boogaloo", "Bossanova", "Candombe", "Carimb\xc3\xb3", "Cha-Cha", "Champeta", "Charanga", "Choro", "Compas", "Conjunto", "Corrido", "Cuatro", "Cubano", "Cumbia", "Danzon", "Descarga", "Forr\xc3\xb3", "Gaita", "Guaguanc\xc3\xb3", "Guajira", "Guaracha", "Jibaro", "Joropo", "Lambada", "Mambo", "Marcha Carnavalesca", "Mariachi", "Marimba", "Merengue", "MPB", "Musette", "M\xc3\xbasica Criolla", "Norte\xc3\xb1o", "Nueva Cancion", "Nueva Trova", "Occitan", "Pachanga", "Plena", "Porro", "Quechua", "Ranchera", "Reggaeton", "Rumba", "Salsa", "Samba", "Samba-Can\xc3\xa7\xc3\xa3o", "Seresta", "Son", "Son Montuno", "Sonero", "Tango", "Tejano", "Timba", "Trova", "Vallenato" };
+static const char *STYLES_NONMUSIC[] = { "", "Audiobook", "Comedy", "Dialogue", "Education", "Field Recording", "Health-Fitness", "Interview", "Monolog", "Movie Effects", "Poetry", "Political", "Promotional", "Public Broadcast", "Public Service Announcement", "Radioplay", "Religious", "Sermon", "Sound Art", "Sound Poetry", "Special Effects", "Speech", "Spoken Word", "Technical", "Therapy" };
+static const char *STYLES_POP[] = { "", "Ballad", "Barbershop", "Bollywood", "Break-In", "Bubblegum", "Chanson", "Enka", "Ethno-pop", "Europop", "Indie Pop", "J-pop", "K-pop", "Karaoke", "Kay\xc5\x8dkyoku", "Levenslied", "Light Music", "Music Hall", "N\xc3\xa9o Kyma", "Novelty", "Parody", "Schlager", "Vocal" };
+static const char *STYLES_REGGAE[] = { "", "Azonto", "Bubbling", "Calypso", "Dancehall", "Dub", "Dub Poetry", "Junkanoo", "Lovers Rock", "Mento", "Ragga", "Rapso", "Reggae", "Reggae Gospel", "Reggae-Pop", "Rocksteady", "Roots Reggae", "Ska", "Soca", "Steel Band" };
+static const char *STYLES_ROCK[] = { "", "Acid Rock", "Acoustic", "Alternative Rock", "AOR", "Arena Rock", "Art Rock", "Atmospheric Black Metal", "Avantgarde", "Beat", "Black Metal", "Blues Rock", "Brit Pop", "Classic Rock", "Coldwave", "Country Rock", "Crust", "Death Metal", "Deathcore", "Deathrock", "Depressive Black Metal", "Doo Wop", "Doom Metal", "Dream Pop", "Emo", "Ethereal", "Experimental", "Folk Metal", "Folk Rock", "Funeral Doom Metal", "Funk Metal", "Garage Rock", "Glam", "Goregrind", "Goth Rock", "Gothic Metal", "Grindcore", "Grunge", "Hard Rock", "Hardcore", "Heavy Metal", "Horror Rock", "Indie Rock", "Industrial", "Krautrock", "Lo-Fi", "Lounge", "Math Rock", "Melodic Death Metal", "Melodic Hardcore", "Metalcore", "Mod", "NDW", "Neofolk", "New Wave", "No Wave", "Noise", "Noisecore", "Nu Metal", "Oi", "Parody", "Pop Punk", "Pop Rock", "Pornogrind", "Post Rock", "Post-Hardcore", "Post-Metal", "Post-Punk", "Power Metal", "Power Pop", "Power Violence", "Prog Rock", "Progressive Metal", "Psychedelic Rock", "Psychobilly", "Pub Rock", "Punk", "Rock & Roll", "Rock Opera", "Rockabilly", "Shoegaze", "Ska", "Skiffle", "Sludge Metal", "Soft Rock", "Southern Rock", "Space Rock", "Speed Metal", "Stoner Rock", "Surf", "Swamp Pop", "Symphonic Rock", "Technical Death Metal", "Thrash", "Twist", "Viking Metal", "Y\xc3\xa9-Y\xc3\xa9" };
+static const char *STYLES_STAGE[] = { "", "Musical", "Score", "Soundtrack", "Theme" };
+
+struct GenreStyles { const char *genre; const char **styles; int n; };
+#define GS(arr) (arr), (int)(sizeof(arr)/sizeof(arr[0]))
+static const GenreStyles CRATEDIG_STYLES[] = {
+    { "",                        GS(STYLES_ANY) },
+    { "Blues",                   GS(STYLES_BLUES) },
+    { "Brass & Military",        GS(STYLES_BRASS) },
+    { "Children's",              GS(STYLES_CHILDRENS) },
+    { "Classical",                GS(STYLES_CLASSICAL) },
+    { "Electronic",               GS(STYLES_ELECTRONIC) },
+    { "Folk, World, & Country",   GS(STYLES_FOLK) },
+    { "Funk / Soul",              GS(STYLES_FUNK) },
+    { "Hip Hop",                  GS(STYLES_HIPHOP) },
+    { "Jazz",                     GS(STYLES_JAZZ) },
+    { "Latin",                    GS(STYLES_LATIN) },
+    { "Non-Music",                GS(STYLES_NONMUSIC) },
+    { "Pop",                      GS(STYLES_POP) },
+    { "Reggae",                   GS(STYLES_REGGAE) },
+    { "Rock",                     GS(STYLES_ROCK) },
+    { "Stage & Screen",           GS(STYLES_STAGE) },
+};
+#undef GS
+static const int N_CRATEDIG_STYLE_GENRES = (int)(sizeof(CRATEDIG_STYLES) / sizeof(CRATEDIG_STYLES[0]));
+
+/* Looks up the style array for whatever genre is currently selected
+ * (matched by value string, not index — CRATEDIG_STYLES and
+ * CRATEDIG_GENRES are independent arrays kept in the same order by
+ * hand, so matching by string is a hair more robust than trusting that
+ * ordering never drifts). Falls back to STYLES_ANY (just "") if the
+ * current genre has no entry (shouldn't happen — every real genre does). */
+static const GenreStyles *styles_for_genre(const char *genre_value) {
+    for (int i = 0; i < N_CRATEDIG_STYLE_GENRES; i++)
+        if (!strcmp(CRATEDIG_STYLES[i].genre, genre_value)) return &CRATEDIG_STYLES[i];
+    return &CRATEDIG_STYLES[0];
+}
+
+static const char *CRATEDIG_DECADES[] = {
+    "", "1950s", "1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "2020s",
+};
+static const int N_CRATEDIG_DECADES = (int)(sizeof(CRATEDIG_DECADES) / sizeof(CRATEDIG_DECADES[0]));
+
+/* Region is a UI-only grouping (not a real Discogs API field — the API
+ * only takes `country`); it exists purely so the shadow GUI's country
+ * stepper doesn't have to cycle through ~70 countries one at a time to
+ * reach, say, Japan. Selecting a region resets the country index to 0
+ * ("Any" within that region) the same way selecting a genre resets style. */
+static const char *CRATEDIG_REGIONS[] = { "Any", "Americas", "Europe", "Africa", "Asia", "Oceania" };
+static const int N_CRATEDIG_REGIONS = (int)(sizeof(CRATEDIG_REGIONS) / sizeof(CRATEDIG_REGIONS[0]));
+
+static const char *COUNTRIES_ANY[] = { "" };
+static const char *COUNTRIES_AMERICAS[] = { "", "Argentina", "Brazil", "Canada", "Chile", "Colombia", "Cuba", "Haiti", "Jamaica", "Mexico", "Peru", "Puerto Rico", "Trinidad & Tobago", "US", "Venezuela" };
+static const char *COUNTRIES_EUROPE[] = { "", "Austria", "Belgium", "Bulgaria", "Croatia", "Czech Republic", "Denmark", "Finland", "France", "Germany", "Greece", "Hungary", "Iceland", "Ireland", "Italy", "Netherlands", "Norway", "Poland", "Portugal", "Romania", "Russia", "Serbia", "Spain", "Sweden", "Switzerland", "Turkey", "UK", "Ukraine" };
+static const char *COUNTRIES_AFRICA[] = { "", "Algeria", "Benin", "Cameroon", "Cape Verde", "Congo", "Egypt", "Ethiopia", "Ghana", "Guinea", "Ivory Coast", "Kenya", "Mali", "Morocco", "Nigeria", "Senegal", "South Africa", "Tanzania", "Zimbabwe" };
+static const char *COUNTRIES_ASIA[] = { "", "China", "India", "Indonesia", "Iran", "Israel", "Japan", "Lebanon", "Pakistan", "Philippines", "South Korea", "Taiwan", "Thailand", "Vietnam" };
+static const char *COUNTRIES_OCEANIA[] = { "", "Australia", "New Zealand" };
+static const char **CRATEDIG_COUNTRIES_BY_REGION[] = {
+    COUNTRIES_ANY, COUNTRIES_AMERICAS, COUNTRIES_EUROPE, COUNTRIES_AFRICA, COUNTRIES_ASIA, COUNTRIES_OCEANIA,
+};
+static const int N_COUNTRIES_BY_REGION[] = {
+    (int)(sizeof(COUNTRIES_ANY)/sizeof(COUNTRIES_ANY[0])),
+    (int)(sizeof(COUNTRIES_AMERICAS)/sizeof(COUNTRIES_AMERICAS[0])),
+    (int)(sizeof(COUNTRIES_EUROPE)/sizeof(COUNTRIES_EUROPE[0])),
+    (int)(sizeof(COUNTRIES_AFRICA)/sizeof(COUNTRIES_AFRICA[0])),
+    (int)(sizeof(COUNTRIES_ASIA)/sizeof(COUNTRIES_ASIA[0])),
+    (int)(sizeof(COUNTRIES_OCEANIA)/sizeof(COUNTRIES_OCEANIA[0])),
+};
+
+/* Current shadow-side selection. Nothing is sent to the DSP core until
+ * "cratedig_search_go" is SET (the FILTERS tab's dedicated SEARCH
+ * button) — selecting a filter only updates this local state, unlike
+ * the first version of this feature which re-searched on every tap (see
+ * the conversation this changed in: a dedicated search button was
+ * requested specifically to stop that). */
+static int g_cd_genre_idx = 0;
+static int g_cd_style_idx = 0;
+static int g_cd_decade_idx = 0;
+static int g_cd_region_idx = 0;
+static int g_cd_country_idx = 0;
+
 static std::string build_search_results_json_locked(bool shadow_safe) {
     char buf[256];
     int n = g_api->get_param(g_inst, "search_count", buf, sizeof(buf));
@@ -396,7 +467,7 @@ static std::string build_search_results_json_locked(bool shadow_safe) {
     std::string json = "[";
     for (int i = 0; i < count; i++) {
         char key[48];
-        std::string title, channel, duration, provider;
+        std::string title, channel, duration, year;
 
         std::snprintf(key, sizeof(key), "search_result_title_%d", i);
         n = g_api->get_param(g_inst, key, buf, sizeof(buf));
@@ -410,9 +481,14 @@ static std::string build_search_results_json_locked(bool shadow_safe) {
         n = g_api->get_param(g_inst, key, buf, sizeof(buf));
         if (n > 0) duration.assign(buf, n);
 
-        std::snprintf(key, sizeof(key), "search_result_provider_%d", i);
+        /* Crate Dig results resolve to a YouTube stream internally (this
+         * addon's own UI never exposes provider choice — see main()'s
+         * forced search_provider — so search_result_provider_<n> is
+         * always "youtube" here and not worth showing). meta_year is
+         * Discogs' own release year instead, which is actually useful. */
+        std::snprintf(key, sizeof(key), "search_result_year_%d", i);
         n = g_api->get_param(g_inst, key, buf, sizeof(buf));
-        if (n > 0) provider.assign(buf, n);
+        if (n > 0) year.assign(buf, n);
 
         std::string label;
         if (shadow_safe) {
@@ -421,13 +497,13 @@ static std::string build_search_results_json_locked(bool shadow_safe) {
              * em dash/parens which would just get stripped anyway. */
             label = shadow_font_safe(title.empty() ? "UNTITLED" : title);
             if (!channel.empty()) label += " - " + shadow_font_safe(channel);
+            if (!year.empty()) label += " " + shadow_font_safe(year);
             if (!duration.empty()) label += " " + shadow_font_safe(duration);
-            if (!provider.empty()) label = shadow_font_safe(provider) + ": " + label;
         } else {
             label = title.empty() ? "(untitled)" : title;
             if (!channel.empty()) label += "  \xe2\x80\x94 " + channel;   /* em dash */
+            if (!year.empty()) label += "  (" + year + ")";
             if (!duration.empty()) label += "  [" + duration + "]";
-            if (!provider.empty()) label = "[" + provider + "] " + label;
         }
 
         if (i) json += ",";
@@ -463,16 +539,42 @@ static bool handle_play_result_index_locked(int idx, std::string &err) {
     return true;
 }
 
-/* Sends the currently-selected genre/decade as the DSP core's own
- * cratedig_filter key (style/country always empty from this path - see
- * CRATEDIG_GENRES' own comment). Setting cratedig_filter is itself what
- * triggers the actual Discogs search (v2_set_param's own handling, not
- * something this shim adds), so every shadow-side genre/decade tap
- * re-searches immediately, same as the web GUI's filter form. */
+/* "ANY" is shown for an empty filter value (genre/style/country's own
+ * "no filter" entry is "", not a real Discogs string) rather than the
+ * blank shadow_font_safe("") would otherwise produce - an empty stepper
+ * box reads as broken, not as "unset". */
+static std::string cd_display_text(const char *value) {
+    return (value[0] == '\0') ? std::string("ANY") : shadow_font_safe(value);
+}
+
+static const GenreStyles *cd_current_styles_locked() {
+    return styles_for_genre(CRATEDIG_GENRES[g_cd_genre_idx]);
+}
+static const char **cd_current_countries_locked(int *out_n) {
+    *out_n = N_COUNTRIES_BY_REGION[g_cd_region_idx];
+    return CRATEDIG_COUNTRIES_BY_REGION[g_cd_region_idx];
+}
+
+/* Composes all five current shadow-side selections into the DSP core's
+ * own cratedig_filter JSON and forwards it - this is what actually
+ * triggers the Discogs search (v2_set_param's own handling of that key,
+ * not something this shim adds). Only called from the SEARCH button's
+ * handler (SET cratedig_search_go) - selecting an individual filter
+ * (genre/style/decade/region/country) only updates local state below,
+ * deliberately NOT re-searching on every tap (an earlier version of this
+ * feature did; a dedicated search button was requested specifically to
+ * stop that - see the FILTERS tab's button in shadow_page.conf). */
 static void send_cratedig_filter_from_shadow_state_locked() {
-    std::string json = "{\"genre\":\"" + json_escape(CRATEDIG_GENRES[g_cd_genre_idx].value) +
-                        "\",\"style\":\"\",\"decade\":\"" + json_escape(CRATEDIG_DECADES[g_cd_decade_idx].value) +
-                        "\",\"country\":\"\"}";
+    const GenreStyles *styles = cd_current_styles_locked();
+    const char *style_val = (g_cd_style_idx < styles->n) ? styles->styles[g_cd_style_idx] : "";
+    int n_countries = 0;
+    const char **countries = cd_current_countries_locked(&n_countries);
+    const char *country_val = (g_cd_country_idx < n_countries) ? countries[g_cd_country_idx] : "";
+
+    std::string json = "{\"genre\":\"" + json_escape(CRATEDIG_GENRES[g_cd_genre_idx]) +
+                        "\",\"style\":\"" + json_escape(style_val) +
+                        "\",\"decade\":\"" + json_escape(CRATEDIG_DECADES[g_cd_decade_idx]) +
+                        "\",\"country\":\"" + json_escape(country_val) + "\"}";
     g_api->set_param(g_inst, "cratedig_filter", json.c_str());
 }
 
@@ -500,7 +602,16 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             if (idx < 0 || idx >= N_CRATEDIG_GENRES) { send(fd, "ERR\n", 4, 0); return; }
             std::lock_guard<std::mutex> lk(g_lock);
             g_cd_genre_idx = idx;
-            send_cratedig_filter_from_shadow_state_locked();
+            g_cd_style_idx = 0;   /* previous genre's style index may not exist in the new one */
+            send(fd, "OK\n", 3, 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_style_index")) {
+            int idx = std::atoi(val);
+            std::lock_guard<std::mutex> lk(g_lock);
+            const GenreStyles *styles = cd_current_styles_locked();
+            if (idx < 0 || idx >= styles->n) { send(fd, "ERR\n", 4, 0); return; }
+            g_cd_style_idx = idx;
             send(fd, "OK\n", 3, 0);
             return;
         }
@@ -509,6 +620,30 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             if (idx < 0 || idx >= N_CRATEDIG_DECADES) { send(fd, "ERR\n", 4, 0); return; }
             std::lock_guard<std::mutex> lk(g_lock);
             g_cd_decade_idx = idx;
+            send(fd, "OK\n", 3, 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_region_index")) {
+            int idx = std::atoi(val);
+            if (idx < 0 || idx >= N_CRATEDIG_REGIONS) { send(fd, "ERR\n", 4, 0); return; }
+            std::lock_guard<std::mutex> lk(g_lock);
+            g_cd_region_idx = idx;
+            g_cd_country_idx = 0;   /* previous region's country index may not exist in the new one */
+            send(fd, "OK\n", 3, 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_country_index")) {
+            int idx = std::atoi(val);
+            std::lock_guard<std::mutex> lk(g_lock);
+            int n_countries = 0;
+            cd_current_countries_locked(&n_countries);
+            if (idx < 0 || idx >= n_countries) { send(fd, "ERR\n", 4, 0); return; }
+            g_cd_country_idx = idx;
+            send(fd, "OK\n", 3, 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_search_go")) {
+            std::lock_guard<std::mutex> lk(g_lock);
             send_cratedig_filter_from_shadow_state_locked();
             send(fd, "OK\n", 3, 0);
             return;
@@ -532,23 +667,51 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
-        if (!strcmp(key, "cratedig_genre_options_json")) {
-            std::string json = "[";
-            for (int i = 0; i < N_CRATEDIG_GENRES; i++) {
-                if (i) json += ",";
-                json += "{\"label\":\"" + json_escape(CRATEDIG_GENRES[i].label) + "\"}";
-            }
-            json += "]\n";
-            send(fd, json.c_str(), json.size(), 0);
+        /* Five stepper GET triples (text/idx/count), all built the same
+         * way: <dimension>_text is cd_display_text() of the currently
+         * selected value ("ANY" for ""), _idx/_count drive the stepper
+         * widget's own bounds. Style is genre-dependent, country is
+         * region-dependent - both look up their current list fresh each
+         * call rather than caching it, since the dependency can change
+         * between calls (a genre tap resets style to index 0, but the
+         * *list itself* also changes shape). */
+        if (!strcmp(key, "cratedig_genre_text")) {
+            std::lock_guard<std::mutex> lk(g_lock);
+            std::string reply = cd_display_text(CRATEDIG_GENRES[g_cd_genre_idx]) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
-        if (!strcmp(key, "cratedig_genre_sel")) {
+        if (!strcmp(key, "cratedig_genre_idx")) {
             std::string reply = std::to_string(g_cd_genre_idx) + "\n";
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
+        if (!strcmp(key, "cratedig_genre_count")) {
+            std::string reply = std::to_string(N_CRATEDIG_GENRES) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_style_text")) {
+            std::lock_guard<std::mutex> lk(g_lock);
+            const GenreStyles *styles = cd_current_styles_locked();
+            int idx = (g_cd_style_idx < styles->n) ? g_cd_style_idx : 0;
+            std::string reply = cd_display_text(styles->styles[idx]) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_style_idx")) {
+            std::string reply = std::to_string(g_cd_style_idx) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_style_count")) {
+            std::lock_guard<std::mutex> lk(g_lock);
+            std::string reply = std::to_string(cd_current_styles_locked()->n) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
         if (!strcmp(key, "cratedig_decade_text")) {
-            std::string reply = std::string(CRATEDIG_DECADES[g_cd_decade_idx].label) + "\n";
+            std::string reply = cd_display_text(CRATEDIG_DECADES[g_cd_decade_idx]) + "\n";
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
@@ -559,6 +722,41 @@ static void handle_ctrl_line(int fd, const std::string &line) {
         }
         if (!strcmp(key, "cratedig_decade_count")) {
             std::string reply = std::to_string(N_CRATEDIG_DECADES) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_region_text")) {
+            std::string reply = shadow_font_safe(CRATEDIG_REGIONS[g_cd_region_idx]) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_region_idx")) {
+            std::string reply = std::to_string(g_cd_region_idx) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_region_count")) {
+            std::string reply = std::to_string(N_CRATEDIG_REGIONS) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_country_text")) {
+            std::lock_guard<std::mutex> lk(g_lock);
+            int n = 0; const char **countries = cd_current_countries_locked(&n);
+            int idx = (g_cd_country_idx < n) ? g_cd_country_idx : 0;
+            std::string reply = cd_display_text(countries[idx]) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_country_idx")) {
+            std::string reply = std::to_string(g_cd_country_idx) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_country_count")) {
+            std::lock_guard<std::mutex> lk(g_lock);
+            int n = 0; cd_current_countries_locked(&n);
+            std::string reply = std::to_string(n) + "\n";
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
@@ -619,7 +817,7 @@ static void ctrl_server_loop(int lfd) {
             std::string line(buf);
             size_t nl = line.find('\n');
             if (nl != std::string::npos) line.resize(nl);
-            if (g_verbose) fprintf(stderr, "[webstream] ctrl: %s\n", line.c_str());
+            if (g_verbose) fprintf(stderr, "[cratedigger] ctrl: %s\n", line.c_str());
             handle_ctrl_line(cfd, line);
         }
         close(cfd);
@@ -650,7 +848,7 @@ static void usage(const char *me) {
         "  -v                    verbose\n"
         "  --module-dir PATH     dir containing module.json, bin/yt-dlp,\n"
         "                        bin/yt_dlp_daemon.py, bin/ffmpeg (default: .)\n"
-        "  --ctrl-sock PATH      control socket path (default: /tmp/webstream_ctrl.sock)\n"
+        "  --ctrl-sock PATH      control socket path (default: /tmp/cratedigger_ctrl.sock)\n"
         "  --mix-slot N          voice slot 0..%d for forceAudioIn.so (default: 0) -\n"
         "                        each simultaneous voice needs a distinct slot\n",
         me, AI_MAX_VOICES - 1);
@@ -692,30 +890,39 @@ int main(int argc, char **argv) {
             fclose(f);
             g_module_json.assign(buf, n);
         } else {
-            fprintf(stderr, "[webstream] warning: %s not found; DESCRIBE will return empty\n", path.c_str());
+            fprintf(stderr, "[cratedigger] warning: %s not found; DESCRIBE will return empty\n", path.c_str());
             g_module_json = "{}";
         }
     }
 
-    if (!shm_setup()) { fprintf(stderr, "[webstream] shared memory setup failed\n"); return 1; }
+    if (!shm_setup()) { fprintf(stderr, "[cratedigger] shared memory setup failed\n"); return 1; }
 
     g_api = move_plugin_init_v2(nullptr);
     if (!g_api || g_api->api_version != 2) {
-        fprintf(stderr, "[webstream] core init failed\n"); return 1;
+        fprintf(stderr, "[cratedigger] core init failed\n"); return 1;
     }
     g_inst = g_api->create_instance(module_dir.c_str(), nullptr);
-    if (!g_inst) { fprintf(stderr, "[webstream] create_instance failed\n"); return 1; }
+    if (!g_inst) { fprintf(stderr, "[cratedigger] create_instance failed\n"); return 1; }
+
+    /* This addon's own UI (web + shadow) only ever exposes Crate Dig, but
+     * the DSP core defaults search_provider to "youtube" internally (see
+     * v2_create_instance in yt_stream_plugin.c) - force it to cratedig at
+     * startup so nothing is ever left pointed at a provider this UI can't
+     * reach. Every other provider is still fully present in the engine
+     * (untouched, per the "port the host, not the DSP" approach) - simply
+     * not surfaced here. */
+    g_api->set_param(g_inst, "search_provider", "cratedig");
 
     int lfd = ctrl_socket_listen(g_ctrl_sock_path);
-    if (lfd < 0) { fprintf(stderr, "[webstream] control socket setup failed\n"); return 1; }
+    if (lfd < 0) { fprintf(stderr, "[cratedigger] control socket setup failed\n"); return 1; }
 
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
 
     fprintf(stderr,
-        "[webstream] up. ctrl socket %s  shm %s  module_dir %s\n"
-        "[webstream] audio is mixed into the Force's capture input via\n"
-        "[webstream] ForceAudioIn (must be enabled separately).\n",
+        "[cratedigger] up. ctrl socket %s  shm %s  module_dir %s\n"
+        "[cratedigger] audio is mixed into the Force's capture input via\n"
+        "[cratedigger] ForceAudioIn (must be enabled separately).\n",
         g_ctrl_sock_path.c_str(), g_shm_name, module_dir.c_str());
 
     std::thread timer(timer_loop);
@@ -731,6 +938,6 @@ int main(int argc, char **argv) {
         g_api->destroy_instance(g_inst);
     }
     if (g_shm) { munmap(g_shm, AI_SHM_BYTES); shm_unlink(g_shm_name); }
-    fprintf(stderr, "[webstream] bye\n");
+    fprintf(stderr, "[cratedigger] bye\n");
     return 0;
 }

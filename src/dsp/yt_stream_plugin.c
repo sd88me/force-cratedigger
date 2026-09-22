@@ -1,5 +1,5 @@
 /*
- * force-webstream DSP core — vendored, near-verbatim, from
+ * force-cratedigger DSP core — vendored, near-verbatim, from
  * schwung-webstream (https://github.com/charlesvestal/schwung-webstream)
  * by Charles Vestal, MIT licensed. Ported here per the "port the host, not
  * the DSP" pattern this project's other Schwung ports use (see
@@ -2102,7 +2102,7 @@ static bool allow_trigger(uint64_t *last_ms, uint64_t debounce_ms) {
  * is where the Force's own sample browser looks - so a file saved here
  * shows up in the Force's own library without the user having to move it
  * by hand, matching what skipbackHost already does for the same reason. */
-#define DOWNLOAD_DIR "/sdcard/Force Documents/Samples/Webstream"
+#define DOWNLOAD_DIR "/sdcard/Force Documents/Samples/CrateDigger"
 
 /* mkdir -p, ported from force-audioin/src/skipbackHost.c's own mkdir_p() -
  * DOWNLOAD_DIR is three levels deep and may not exist yet on a fresh
@@ -2561,7 +2561,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         if (val[0] != '\0' && strcmp(val, "trigger") != 0) {
             snprintf(inst->download_title, sizeof(inst->download_title), "%s", val);
         } else {
-            snprintf(inst->download_title, sizeof(inst->download_title), "webstream");
+            snprintf(inst->download_title, sizeof(inst->download_title), "cratedigger");
         }
 
         /* Stop the stream so yt-dlp/ffmpeg don't conflict */

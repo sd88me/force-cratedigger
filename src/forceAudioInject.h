@@ -1,7 +1,7 @@
 /*
  * VENDORED from force-audioin (src/forceAudioInject.h) - that repo owns the
  * canonical copy since forceAudioIn.c/forceAudioIn.so define this layout;
- * this copy exists only because webstream_host (the producer below) needs
+ * this copy exists only because cratedigger_host (the producer below) needs
  * it too. Keep byte-for-byte identical to the canonical copy - this is the
  * shared-memory ABI contract between the two repos, not independently-
  * evolvable code.

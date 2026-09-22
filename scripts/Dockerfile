@@ -1,4 +1,4 @@
-# Build environment for force-webstream — Akai Force is ARM 32-bit
+# Build environment for force-cratedigger — Akai Force is ARM 32-bit
 # hard-float (ELF 32-bit LSB, ARM EABI5, /lib/ld-linux-armhf.so.3,
 # "GNU/Linux 3.2.0"). Same toolchain choice as force-maze/force-acid: build
 # *natively for armhf under QEMU emulation* rather than cross-compile, so

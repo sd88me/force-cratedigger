@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Build webstream_host for the Akai Force (armhf) inside a QEMU-emulated
+# Build cratedigger_host for the Akai Force (armhf) inside a QEMU-emulated
 # armhf container (same toolchain as force-maze/force-acid — see
 # scripts/Dockerfile) and assemble the MockbaMod addon folder under dist/.
 #
-#   dist/webstream_host         the armhf binary (DSP core + ring out + ctrl sock)
-#   dist/ForceWebstream/        the addon folder (drop into AddOns/)
+#   dist/cratedigger_host         the armhf binary (DSP core + ring out + ctrl sock)
+#   dist/ForceCrateDigger/        the addon folder (drop into AddOns/)
 #
 # This only builds the native binary. Run scripts/build-deps.sh separately
-# (or first) to fetch yt-dlp/ffmpeg into dist/ForceWebstream/bin/ — without
+# (or first) to fetch yt-dlp/ffmpeg into dist/ForceCrateDigger/bin/ — without
 # those the engine starts but every search/stream fails with a clear error.
 #
 # Requires Docker with armhf emulation (see force-acid/scripts/build.sh for
@@ -17,7 +17,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-IMG=force-webstream-builder
+IMG=force-cratedigger-builder
 PLATFORM=linux/arm/v7
 
 echo "== build armhf toolchain image ($PLATFORM) =="
@@ -27,7 +27,7 @@ echo "== compile + package (native armhf under QEMU — slow, be patient) =="
 docker run --rm --platform "$PLATFORM" \
   -u "$(id -u):$(id -g)" -v "$PWD":/build -w /build "$IMG" bash -euxc '
   COMMON="-O2 -Wall -Wextra -Wno-unused-parameter -Isrc -Isrc/include"
-  rm -rf dist && mkdir -p dist/ForceWebstream/web obj
+  rm -rf dist && mkdir -p dist/ForceCrateDigger/web obj
 
   # DSP core — C, upstream logic untouched apart from the two Force-path
   # #defines noted at the top of src/dsp/yt_stream_plugin.c. -Isrc/include
@@ -41,49 +41,49 @@ docker run --rm --platform "$PLATFORM" \
   gcc $COMMON -c src/dsp/yt_stream_plugin.c -o obj/yt_stream_plugin.o
 
   # host shim — C++
-  g++ $COMMON -std=c++14 -c src/webstream_host.cpp      -o obj/webstream_host.o
+  g++ $COMMON -std=c++14 -c src/cratedigger_host.cpp      -o obj/cratedigger_host.o
 
-  g++ obj/yt_stream_plugin.o obj/webstream_host.o \
+  g++ obj/yt_stream_plugin.o obj/cratedigger_host.o \
       -lpthread \
-      -o dist/webstream_host
+      -o dist/cratedigger_host
 
-  strip dist/webstream_host
-  file dist/webstream_host
+  strip dist/cratedigger_host
+  file dist/cratedigger_host
   echo "-- shared libs the Force must provide --"
-  readelf -d dist/webstream_host | grep NEEDED
+  readelf -d dist/cratedigger_host | grep NEEDED
   echo "-- highest glibc symbol version required (want <= 2.28) --"
-  { readelf -V dist/webstream_host | grep -o "GLIBC_[0-9.]*" | sort -uV | tail -3; } || true
+  { readelf -V dist/cratedigger_host | grep -o "GLIBC_[0-9.]*" | sort -uV | tail -3; } || true
 
   rm -rf obj
 
-  cp dist/webstream_host           dist/ForceWebstream/webstream_host
-  cp addon/module.json             dist/ForceWebstream/
-  cp addon/manage.sh               dist/ForceWebstream/
-  cp addon/run_webstream_host.sh   dist/ForceWebstream/
-  cp addon/NSMODULE.json           dist/ForceWebstream/
-  cp addon/shadow_page.conf        dist/ForceWebstream/
-  cp addon/web/manage.sh           dist/ForceWebstream/web/
-  cp addon/web/run_webstream_web.sh dist/ForceWebstream/web/
-  cp addon/web/server.py           dist/ForceWebstream/web/
-  cp addon/web/index.html          dist/ForceWebstream/web/
-  cp src/bin/yt_dlp_daemon.py      dist/ForceWebstream/  # moved into bin/ below
-  mkdir -p dist/ForceWebstream/bin
-  mv dist/ForceWebstream/yt_dlp_daemon.py dist/ForceWebstream/bin/yt_dlp_daemon.py
-  chmod 0755 dist/ForceWebstream/webstream_host
-  chmod 0755 dist/ForceWebstream/manage.sh dist/ForceWebstream/run_webstream_host.sh
-  chmod 0755 dist/ForceWebstream/web/manage.sh dist/ForceWebstream/web/run_webstream_web.sh
+  cp dist/cratedigger_host           dist/ForceCrateDigger/cratedigger_host
+  cp addon/module.json             dist/ForceCrateDigger/
+  cp addon/manage.sh               dist/ForceCrateDigger/
+  cp addon/run_cratedigger_host.sh   dist/ForceCrateDigger/
+  cp addon/NSMODULE.json           dist/ForceCrateDigger/
+  cp addon/shadow_page.conf        dist/ForceCrateDigger/
+  cp addon/web/manage.sh           dist/ForceCrateDigger/web/
+  cp addon/web/run_cratedigger_web.sh dist/ForceCrateDigger/web/
+  cp addon/web/server.py           dist/ForceCrateDigger/web/
+  cp addon/web/index.html          dist/ForceCrateDigger/web/
+  cp src/bin/yt_dlp_daemon.py      dist/ForceCrateDigger/  # moved into bin/ below
+  mkdir -p dist/ForceCrateDigger/bin
+  mv dist/ForceCrateDigger/yt_dlp_daemon.py dist/ForceCrateDigger/bin/yt_dlp_daemon.py
+  chmod 0755 dist/ForceCrateDigger/cratedigger_host
+  chmod 0755 dist/ForceCrateDigger/manage.sh dist/ForceCrateDigger/run_cratedigger_host.sh
+  chmod 0755 dist/ForceCrateDigger/web/manage.sh dist/ForceCrateDigger/web/run_cratedigger_web.sh
 
   if [ -d build/deps/bin ]; then
-    cp build/deps/bin/* dist/ForceWebstream/bin/
-    chmod 0755 dist/ForceWebstream/bin/* || true
+    cp build/deps/bin/* dist/ForceCrateDigger/bin/
+    chmod 0755 dist/ForceCrateDigger/bin/* || true
     echo "-- bundled runtime deps --"
-    ls -la dist/ForceWebstream/bin
+    ls -la dist/ForceCrateDigger/bin
   else
     echo "!! build/deps/bin not found — run scripts/build-deps.sh first for a"
     echo "!! self-contained bundle, or copy your own yt-dlp/ffmpeg/ffprobe"
-    echo "!! into dist/ForceWebstream/bin/ by hand before deploying."
+    echo "!! into dist/ForceCrateDigger/bin/ by hand before deploying."
   fi
 
-  ls -la dist dist/ForceWebstream
+  ls -la dist dist/ForceCrateDigger
 '
-echo "== done -> dist/ForceWebstream/ =="
+echo "== done -> dist/ForceCrateDigger/ =="

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Force Webstream web control panel — serves the UI (web/index.html, a new
-design for this port; see README.md for credit to the original
-schwung-webstream project) and bridges its search/transport/gain actions to
-webstream_host's Unix control socket (SET/GET/DESCRIBE — see
-src/webstream_host.cpp's header comment for the protocol, including the two
-keys added on the Force side: `search_results_json` and
-`play_result_index`).
+"""Force Crate Digger web control panel — serves the UI (web/index.html, a
+vintage-Akai-MPC-themed page; see README.md for credit to the original
+schwung-webstream project this is built on) and bridges its Discogs-filter/
+transport/gain actions to cratedigger_host's Unix control socket (SET/GET/
+DESCRIBE — see src/cratedigger_host.cpp's header comment for the protocol,
+including the keys added on the Force side: `search_results_json` and
+`play_result_index`). The engine's other providers (YouTube/SoundCloud/
+archive.org/Freesound search) are still present but this addon's own UI
+only ever sets `cratedig_filter` — see cratedigger_host.cpp's main().
 
 Deliberately stdlib-only (http.server + socket): no pip install step needed
 on-device, matching this project's other web panels (force-maze/web/
@@ -21,12 +23,12 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 WEB_DIR = Path(__file__).resolve().parent
-CTRL_SOCK = "/tmp/webstream_ctrl.sock"
+CTRL_SOCK = "/tmp/cratedigger_ctrl.sock"
 SOCK_TIMEOUT = 4.0  # search round-trips (yt-dlp) are slower than a knob turn
 
 
 def ctrl_request(line: str, timeout: float = SOCK_TIMEOUT):
-    """Send one line to webstream_host's control socket, return its reply
+    """Send one line to cratedigger_host's control socket, return its reply
     (or None if the engine isn't reachable). One connection per request -
     `with` guarantees the socket closes on every exit path, including a
     connect/send/recv timeout (see force-maze/web/server.py's own comment
@@ -50,10 +52,10 @@ def ctrl_request(line: str, timeout: float = SOCK_TIMEOUT):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ForceWebstreamWeb/0.1"
+    server_version = "ForceCrateDiggerWeb/0.1"
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("[webstream-web] " + (fmt % args) + "\n")
+        sys.stderr.write("[cratedigger-web] " + (fmt % args) + "\n")
 
     def _text(self, code, body, ctype="text/plain; charset=utf-8"):
         data = body.encode("utf-8")
@@ -163,15 +165,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200 if reply == "OK" else 503, {"ok": reply == "OK"})
             return
 
-        if path == "/search":
-            provider = body.get("provider") or "youtube"
-            query = body.get("query") or ""
-            r1 = ctrl_request(f"SET search_provider {provider}", timeout=1.0)
-            r2 = ctrl_request(f"SET search_query {query}", timeout=1.0)
-            self._json(200 if (r1 == "OK" and r2 == "OK") else 503,
-                       {"ok": r1 == "OK" and r2 == "OK"})
-            return
-
         if path == "/play":
             idx = body.get("index")
             if idx is None:
@@ -182,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/download":
-            title = (body.get("title") or "webstream").replace("\n", " ")
+            title = (body.get("title") or "cratedigger").replace("\n", " ")
             reply = ctrl_request(f"SET download_wav {title}", timeout=1.0)
             self._json(200 if reply == "OK" else 503, {"ok": reply == "OK"})
             return
@@ -200,7 +193,7 @@ def main():
         CTRL_SOCK = args[args.index("--ctrl-sock") + 1]
 
     srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"[webstream-web] serving on http://0.0.0.0:{port}  (control socket: {CTRL_SOCK})")
+    print(f"[cratedigger-web] serving on http://0.0.0.0:{port}  (control socket: {CTRL_SOCK})")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
