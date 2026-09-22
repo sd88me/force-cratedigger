@@ -7,12 +7,13 @@
 <style>
   :root {
     /* Vintage Akai MPC60: greige chassis, navy data-entry-pad blue for
-       selection, cream buttons/knobs, MPC red for action, dark-olive LCD. */
+       selection, cream buttons/knobs, MPC red for action, blue LCD text
+       (a deliberate departure from the MPC60's own green LCD). */
     --bg: #c7c2b0; --panel: #b9b3a0; --panel-hi: #ded8c6; --line: #8f8a78;
     --ink: #2b2822; --ink-dim: #5c5648; --ink-faint: #8a8474;
-    --accent: #6b8a35; --accent-hi: #547028; --red: #b8382b; --red-hi: #cf4433;
+    --accent: #4a7ab8; --accent-hi: #6f9ad6; --red: #b8382b; --red-hi: #cf4433;
     --navy: #2f4a6b; --navy-hi: #3d5f87; --cream: #ede8d8;
-    --lcd-bg: #16210f; --lcd-ink: #9ab34a;
+    --lcd-bg: #141a22; --lcd-ink: #6fa3dc;
     --led-off: #8f8a78; --led-on: var(--accent);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -63,10 +64,10 @@
   #results { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; }
   .result {
     display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px;
-    border: 1px solid transparent; cursor: pointer; background: #101a0a;
+    border: 1px solid transparent; cursor: pointer; background: #101822;
   }
-  .result:active { background: #1a2712; }
-  .result.playing { border-color: var(--accent); background: #1a2712; }
+  .result:active { background: #18293e; }
+  .result.playing { border-color: var(--accent); background: #18293e; }
   .result .idx { font-family: ui-monospace, monospace; font-size: 10px; color: var(--ink-faint); width: 18px; text-align: right; flex-shrink: 0; }
   .result .meta { min-width: 0; flex: 1; }
   .result .title { font-size: 13px; font-weight: 600; color: var(--lcd-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

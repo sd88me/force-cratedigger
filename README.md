@@ -33,13 +33,14 @@ see [Credit & what's actually new here](#credit--whats-actually-new-here).
   WAV.
 - **Shadow GUI** (`addon/shadow_page.conf`): a `style=td3` page themed
   after a vintage Akai MPC60 — `SHIFT+SCENE-6` opens it directly on the
-  Force's own touchscreen, three tabs:
-  - **PLAY** — transport, output gain/routing, engine on/off.
+  Force's own touchscreen, two tabs:
+  - **PLAY** — transport, output gain/routing, engine on/off, a results
+    list (tap to play), and its own **SEARCH** button so a filter set on
+    the FILTERS tab can be re-run without switching tabs.
   - **FILTERS** — five steppers (Genre, Style, Decade, Region, Country —
     Style depends on the current Genre, Country on the current Region)
     and a dedicated **SEARCH DISCOGS** button, same "nothing searches
     until you press it" behavior as the web GUI.
-  - **RESULTS** — a paged list of hits, tap to play.
 
 ## How it works (for anyone extending this)
 
@@ -96,7 +97,8 @@ own header comment. In short:
 mode) plus a `theme_*` palette pulled from a real Akai MPC60 photo:
 greige chassis, navy blue for the active/selected state (matching the
 MPC60's data-entry keypad), cream knob/button text, MPC red for action
-buttons, dark-olive LCD-green readouts. `style=td3` and the colors are
+buttons, and a complementary blue for readout/accent text — a deliberate
+departure from the MPC60's own green LCD. `style=td3` and the colors are
 independent knobs — see `addon/shadow_page.conf`'s own top-of-file
 comment. The web GUI (`addon/web/index.html`) uses matching CSS tokens
 for visual consistency between the two surfaces.
