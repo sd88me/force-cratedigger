@@ -78,6 +78,64 @@ static bool         g_verbose = false;
 static unsigned     g_mix_slot = 0;    /* which /forceAudioInjectN this instance owns */
 
 /* ---------------------------------------------------------------------------
+ * Crate Dig (Discogs) genre/decade pickers, for the shadow GUI's `list`
+ * (genre) and `stepper` (decade) widgets — see shadow_page.conf's
+ * CRATEDIG tab. There's no on-device keyboard, so unlike the web GUI's
+ * free-text genre/style/decade/country fields, the shadow GUI can only
+ * choose from a small fixed set here; style/country stay web-GUI-only
+ * (see the SET handlers below for the resulting, documented limitation:
+ * selecting genre/decade from the shadow GUI sends a filter with EMPTY
+ * style/country, so it clobbers whatever those were set to from the web
+ * GUI - crate-dig filtering is one UI at a time, not merged state).
+ *
+ * `label` is what's actually drawn (Force Shadow's font is upper-case-only
+ * with almost no punctuation - see shadow_font_safe()'s own comment), kept
+ * deliberately separate from `value`, the literal string sent to Discogs
+ * via the DSP core's own cratedig_filter protocol (yt_dlp_daemon.py's
+ * _build_search_params()) - genre names there are Discogs' own official
+ * taxonomy (commas/ampersands and all) and decade values specifically
+ * need a lower-case trailing "s" (daemon does `.replace("s", "")|`) so the
+ * two must not be the same string.
+ * ------------------------------------------------------------------------- */
+struct CratedigOption { const char *label; const char *value; };
+
+static const CratedigOption CRATEDIG_GENRES[] = {
+    { "ANY",                  "" },
+    { "BLUES",                "Blues" },
+    { "BRASS + MILITARY",     "Brass & Military" },
+    { "CHILDRENS",            "Children's" },
+    { "CLASSICAL",            "Classical" },
+    { "ELECTRONIC",           "Electronic" },
+    { "FOLK WORLD COUNTRY",   "Folk, World, & Country" },
+    { "FUNK / SOUL",          "Funk / Soul" },
+    { "HIP HOP",              "Hip Hop" },
+    { "JAZZ",                 "Jazz" },
+    { "LATIN",                "Latin" },
+    { "NON-MUSIC",            "Non-Music" },
+    { "POP",                  "Pop" },
+    { "REGGAE",               "Reggae" },
+    { "ROCK",                 "Rock" },
+    { "STAGE + SCREEN",       "Stage & Screen" },
+};
+static const int N_CRATEDIG_GENRES = (int)(sizeof(CRATEDIG_GENRES) / sizeof(CRATEDIG_GENRES[0]));
+
+static const CratedigOption CRATEDIG_DECADES[] = {
+    { "ANY",   "" },
+    { "1950S", "1950s" },
+    { "1960S", "1960s" },
+    { "1970S", "1970s" },
+    { "1980S", "1980s" },
+    { "1990S", "1990s" },
+    { "2000S", "2000s" },
+    { "2010S", "2010s" },
+    { "2020S", "2020s" },
+};
+static const int N_CRATEDIG_DECADES = (int)(sizeof(CRATEDIG_DECADES) / sizeof(CRATEDIG_DECADES[0]));
+
+static int g_cd_genre_idx = 0;
+static int g_cd_decade_idx = 0;
+
+/* ---------------------------------------------------------------------------
  * Shared-memory ring setup (producer side) — identical in shape to
  * maze_host's; see forceAudioInject.h for the full ABI contract.
  * ------------------------------------------------------------------------- */
@@ -229,6 +287,26 @@ static void timer_loop() {
  *    This composes those two calls server-side so the shadow page and web
  *    GUI can both just "select result N" without duplicating that
  *    two-step protocol knowledge in two different UIs.
+ *  - "cratedig_genre_index" / "cratedig_decade_index" (SET, integer index)
+ *    and "cratedig_genre_options_json" / "cratedig_genre_sel" /
+ *    "cratedig_decade_text" / "cratedig_decade_idx" / "cratedig_decade_count"
+ *    (GET) — the shadow GUI's CRATEDIG tab has no keyboard, so unlike the
+ *    web GUI's free-text genre/style/decade/country fields it can only
+ *    pick from the small fixed CRATEDIG_GENRES/CRATEDIG_DECADES tables
+ *    above (a `list` widget for genre, a `stepper` for decade). Setting
+ *    either index composes a cratedig_filter JSON from BOTH current
+ *    indices (with style/country always empty) and forwards it to the
+ *    core's real "cratedig_filter" key, which is itself what triggers the
+ *    actual Discogs search — see send_cratedig_filter_from_shadow_state_
+ *    locked()'s own comment for the resulting limitation (shadow-side
+ *    filtering clobbers any style/country set from the web GUI).
+ *  - "<key>_shadow" (GET, generic suffix) — strips the suffix, fetches the
+ *    real value (core or mix.*), and runs it through shadow_font_safe().
+ *    Most of the core's own text status values (stream_status:
+ *    "streaming"/"paused"/...; search_status: "idle"/"searching"/...) are
+ *    lowercase words that would render the same way search results did
+ *    before the fix above. playback_time is exempt (digits + ':' only,
+ *    already safe) so its readout uses the plain key directly.
  * ------------------------------------------------------------------------- */
 static bool handle_mix_set(const std::string &key, const std::string &val) {
     if (key == "mix.enabled") {
@@ -385,6 +463,19 @@ static bool handle_play_result_index_locked(int idx, std::string &err) {
     return true;
 }
 
+/* Sends the currently-selected genre/decade as the DSP core's own
+ * cratedig_filter key (style/country always empty from this path - see
+ * CRATEDIG_GENRES' own comment). Setting cratedig_filter is itself what
+ * triggers the actual Discogs search (v2_set_param's own handling, not
+ * something this shim adds), so every shadow-side genre/decade tap
+ * re-searches immediately, same as the web GUI's filter form. */
+static void send_cratedig_filter_from_shadow_state_locked() {
+    std::string json = "{\"genre\":\"" + json_escape(CRATEDIG_GENRES[g_cd_genre_idx].value) +
+                        "\",\"style\":\"\",\"decade\":\"" + json_escape(CRATEDIG_DECADES[g_cd_decade_idx].value) +
+                        "\",\"country\":\"\"}";
+    g_api->set_param(g_inst, "cratedig_filter", json.c_str());
+}
+
 static void handle_ctrl_line(int fd, const std::string &line) {
     char cmd[16] = {0}, key[64] = {0}, val[256] = {0};
     if (sscanf(line.c_str(), "%15s", cmd) != 1) { send(fd, "ERR\n", 4, 0); return; }
@@ -404,6 +495,24 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             else send(fd, "ERR\n", 4, 0);
             return;
         }
+        if (!strcmp(key, "cratedig_genre_index")) {
+            int idx = std::atoi(val);
+            if (idx < 0 || idx >= N_CRATEDIG_GENRES) { send(fd, "ERR\n", 4, 0); return; }
+            std::lock_guard<std::mutex> lk(g_lock);
+            g_cd_genre_idx = idx;
+            send_cratedig_filter_from_shadow_state_locked();
+            send(fd, "OK\n", 3, 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_decade_index")) {
+            int idx = std::atoi(val);
+            if (idx < 0 || idx >= N_CRATEDIG_DECADES) { send(fd, "ERR\n", 4, 0); return; }
+            std::lock_guard<std::mutex> lk(g_lock);
+            g_cd_decade_idx = idx;
+            send_cratedig_filter_from_shadow_state_locked();
+            send(fd, "OK\n", 3, 0);
+            return;
+        }
         std::lock_guard<std::mutex> lk(g_lock);
         g_api->set_param(g_inst, key, val);
         send(fd, "OK\n", 3, 0);
@@ -420,6 +529,36 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             bool shadow_safe = !strcmp(key, "search_results_shadow_json");
             std::lock_guard<std::mutex> lk(g_lock);
             std::string reply = build_search_results_json_locked(shadow_safe) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_genre_options_json")) {
+            std::string json = "[";
+            for (int i = 0; i < N_CRATEDIG_GENRES; i++) {
+                if (i) json += ",";
+                json += "{\"label\":\"" + json_escape(CRATEDIG_GENRES[i].label) + "\"}";
+            }
+            json += "]\n";
+            send(fd, json.c_str(), json.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_genre_sel")) {
+            std::string reply = std::to_string(g_cd_genre_idx) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_decade_text")) {
+            std::string reply = std::string(CRATEDIG_DECADES[g_cd_decade_idx].label) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_decade_idx")) {
+            std::string reply = std::to_string(g_cd_decade_idx) + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
+        if (!strcmp(key, "cratedig_decade_count")) {
+            std::string reply = std::to_string(N_CRATEDIG_DECADES) + "\n";
             send(fd, reply.c_str(), reply.size(), 0);
             return;
         }
