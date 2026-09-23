@@ -312,12 +312,14 @@ static void setParameter(AEffect *e, int32_t i, float v) {
         p->api->set_param(p->core, "gain", s);
         return;
     }
-    case T_SLOT:
-        if (v > 0.5f) {
-            int idx = p->page * SLOTS + (i - P_RESULT_1);
-            if (idx < result_count(p)) play_result(p, idx);
-        }
+    case T_SLOT: {
+        /* A touch toggles the row's value (it reads 1 while that row plays): play on any change. */
+        bool fire = std::fabs(v - p->last[i]) > 0.25f;
+        p->last[i] = v;
+        int idx = p->page * SLOTS + (i - P_RESULT_1);
+        if (fire && idx < result_count(p)) play_result(p, idx);
         return;
+    }
     case T_TRIGGER: break;
     default: return;
     }
@@ -327,11 +329,12 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     p->last[i] = v;
     if (!fire) return;
     p->release[i] = 1;
-    if (i >= P_GENRE_PREV && i <= P_COUNTRY_NEXT) {
-        int d = (i - P_GENRE_PREV) / 2, dir = ((i - P_GENRE_PREV) % 2) ? 1 : -1;
-        set_dim(p, d, p->dim[d] + dir);
+    if (i >= P_GENRE_PREV && i <= P_COUNTRY_NEXT) {   /* arrows wrap: ANY <-> last entry */
+        int d = (i - P_GENRE_PREV) / 2, dir = ((i - P_GENRE_PREV) % 2) ? 1 : -1, n = dim_count(p, d);
+        set_dim(p, d, (p->dim[d] + dir + n) % n);
     } else if (i == P_PAGE_PREV || i == P_PAGE_NEXT) {
-        stepper_set(p, P_PAGE, p->page + (i == P_PAGE_NEXT ? 1 : -1));
+        int n = page_count(p);
+        stepper_set(p, P_PAGE, (p->page + (i == P_PAGE_NEXT ? 1 : -1) + n) % n);
     } else if (i == P_SEARCH) {
         do_search(p);
     } else if (i == P_PLAY_PAUSE) {
