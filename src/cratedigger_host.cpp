@@ -60,6 +60,7 @@
 #include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
@@ -356,9 +357,39 @@ static bool handle_mix_get(const std::string &key, std::string &out) {
  * directly) via `pgrep -x` before each toggle, so this is always acting
  * on the true current state.
  * ------------------------------------------------------------------------- */
+/* Bug (2026-09-24, live device): this used to shell out to `pgrep -x
+ * skipbackHost`. Confirmed live: this device's busybox pgrep's -x flag
+ * doesn't actually exact-match (`pgrep -x skipbackHost` reports not
+ * found even with it running; plain `pgrep skipbackHost`, no -x, finds
+ * it fine) - so this always read as "not running", every toggle tap
+ * always requested RUNNING=true, and once it was already on (the very
+ * first tap), nodeServer's own duplicate-spawn guard correctly no-op'd
+ * every request after that - it could never be switched off from this
+ * button again. Scanning /proc/<pid>/comm directly (same dependency-
+ * free approach force_shadow.c's own is_process_running() already
+ * uses) sidesteps this busybox quirk entirely rather than chasing the
+ * "right" pgrep flags on an environment this inconsistent. */
 static bool skipback_is_running() {
-    std::string cmd = std::string("pgrep -x ") + SKIPBACK_PROCESSNAME + " >/dev/null 2>&1";
-    return std::system(cmd.c_str()) == 0;
+    DIR *d = opendir("/proc");
+    if (!d) return false;
+    struct dirent *de;
+    bool found = false;
+    while (!found && (de = readdir(d)) != nullptr) {
+        if (de->d_name[0] < '0' || de->d_name[0] > '9') continue;
+        char path[64];
+        std::snprintf(path, sizeof(path), "/proc/%s/comm", de->d_name);
+        FILE *f = std::fopen(path, "r");
+        if (!f) continue;
+        char comm[32] = {0};
+        if (std::fgets(comm, sizeof(comm), f)) {
+            size_t len = std::strlen(comm);
+            if (len && comm[len - 1] == '\n') comm[len - 1] = '\0';
+            if (std::strcmp(comm, SKIPBACK_PROCESSNAME) == 0) found = true;
+        }
+        std::fclose(f);
+    }
+    closedir(d);
+    return found;
 }
 
 static void send_skipback_toggle(bool want_running) {
@@ -821,6 +852,56 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             send_cratedig_filter_from_shadow_state_locked();
             send(fd, "OK\n", 3, 0);
             return;
+        }
+        /* Bug (2026-09-24, live device): PLAY/PAUSE on the shadow page's
+         * transport tapped play_pause_step, which only toggles pause on
+         * an ALREADY-loaded stream (yt_stream_plugin.c's own handler
+         * no-ops if stream_url is empty) -- it never starts anything on
+         * its own. That's non-obvious from the button's label, and the
+         * confirmed live failure mode: the user tapped PLAY/PAUSE
+         * without first tapping a row in the RESULTS list (the only
+         * thing that actually calls handle_play_result_index_locked),
+         * heard nothing, and had no way to tell why. The list's own
+         * currently-highlighted row (cratedig_result_index, synced by
+         * the shadow GUI's list widget on every touch regardless of
+         * whether PLAY was tapped on it) is a natural fallback: if
+         * nothing is loaded yet, play whatever's currently highlighted
+         * instead of silently doing nothing. */
+        if (!strcmp(key, "play_pause_step")) {
+            char stream_url_buf[32];  /* only checked for emptiness, truncation is fine */
+            g_api->get_param(g_inst, "stream_url", stream_url_buf, sizeof(stream_url_buf));
+            if (stream_url_buf[0] == '\0') {
+                char idx_buf[16];
+                g_api->get_param(g_inst, "cratedig_result_index", idx_buf, sizeof(idx_buf));
+                int idx = std::atoi(idx_buf);
+                std::string err;
+                bool ok;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    ok = handle_play_result_index_locked(idx, err);
+                }
+                /* Confirmed live: search_status_shadow can read DONE a
+                 * moment before search_result_url_<idx> (and friends) are
+                 * actually visible to this thread -- a pre-existing race
+                 * in how the search-completion flag and the result
+                 * fields themselves get published, not something new
+                 * here. A human tapping a row naturally has think-time
+                 * that dodges it; this fallback fires immediately after
+                 * DONE with none. Bounded retry (a few short sleeps)
+                 * rather than chasing the underlying missing barrier --
+                 * matches this codebase's existing debounce/retry style
+                 * elsewhere (e.g. allow_trigger()) for a race this cheap
+                 * to just wait out. */
+                for (int tries = 0; !ok && tries < 5; tries++) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    ok = handle_play_result_index_locked(idx, err);
+                }
+                send(fd, ok ? "OK\n" : "ERR\n", ok ? 3 : 4, 0);
+                return;
+            }
+            /* Something's already loaded -- fall through to the normal
+             * pause/resume toggle below. */
         }
         if (!strcmp(key, "skipback_toggle")) {
             bool now_running = skipback_is_running();

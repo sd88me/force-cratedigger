@@ -349,7 +349,24 @@ static int start_daemon_locked(yt_instance_t *inst, char *err, size_t err_len) {
         close(parent_to_child[1]);
         close(child_to_parent[0]);
         close(child_to_parent[1]);
-        execl(python_path, "python3", daemon_path, ytdlp_path, (char *)NULL);
+        /* Bug (2026-09-24, live device): argv[0] here used to be the bare
+         * string "python3", not python_path. This embedded interpreter's
+         * own landmark search partly keys off argv[0] (confirmed live:
+         * `exec -a python3 .../python3.11 -c "import sys; print(sys.exec_prefix)"`
+         * prints "/install" -- a leftover build-time path baked into this
+         * binary -- instead of the real bin/python3 tree; sys.prefix
+         * alone still resolved correctly, which is why this wasn't
+         * obviously broken, but sys.exec_prefix governs where
+         * lib-dynload's compiled extension modules live, so _ssl/_socket
+         * et al silently failed to import). That's what made every
+         * search hang in "SEARCHING" then crash-loop: the daemon kept
+         * dying on its own network import and getting relaunched, never
+         * completing a request. Passing python_path itself as argv[0]
+         * (the actual absolute path, not a bare name) matches how this
+         * same interpreter resolves correctly everywhere else it's
+         * invoked (an interactive shell's argv[0] is always its real
+         * invocation path). */
+        execl(python_path, python_path, daemon_path, ytdlp_path, (char *)NULL);
         _exit(127);
     }
 
@@ -980,8 +997,21 @@ static int start_stream_legacy(yt_instance_t *inst) {
          * SoundCloud URL failed via the daemon's own pipeline, worked
          * standalone the moment --ffmpeg-location pointed at our bundled
          * armhf static build. */
+        /* Bug (2026-09-24, live device): running "bin/yt-dlp" directly
+         * (relying on its own "#!/usr/bin/env python3" shebang) always
+         * runs it under the device's SYSTEM python3 (3.8), never this
+         * addon's bundled 3.11 (see this file's own comment above on why
+         * that matters) - regardless of which interpreter spawned this
+         * shell. Confirmed live: system python3.8 here has no working
+         * zlib at all, so it can't even unzip yt-dlp's own zipapp
+         * (ModuleNotFoundError: No module named 'zlib' -> immediate,
+         * silent failure, 2>/dev/null swallows it, the pipeline just
+         * gets zero bytes and reports EOF like a normal end-of-stream).
+         * Every "exec/run bin/yt-dlp" site needs the same explicit
+         * bin/python3/bin/python3.11 prefix the daemon (start_yt_daemon,
+         * above) already uses, not just this one. */
         snprintf(cmd, sizeof(cmd),
-            "exec \"%s/bin/yt-dlp\" --no-playlist "
+            "exec \"%s/bin/python3/bin/python3.11\" \"%s/bin/yt-dlp\" --no-playlist "
             "--ffmpeg-location \"%s/bin/ffmpeg\" "
             "%s"
             "-f \"%s\" -o - \"%s\" 2>/dev/null | "
@@ -991,7 +1021,7 @@ static int start_stream_legacy(yt_instance_t *inst) {
             "-i pipe:0 -vn -sn -dn "
             "-af \"aresample=%d\" "
             "-f s16le -ac 2 -ar %d pipe:1",
-            inst->module_dir, inst->module_dir, extractor_args, legacy_fmt, inst->stream_url,
+            inst->module_dir, inst->module_dir, inst->module_dir, extractor_args, legacy_fmt, inst->stream_url,
             inst->module_dir, ss_flag, MOVE_SAMPLE_RATE, MOVE_SAMPLE_RATE);
     }
 
@@ -1147,12 +1177,15 @@ static int run_search_command_legacy(const yt_instance_t *inst,
 
     sanitize_query(query, clean_query, sizeof(clean_query));
 
+    /* bin/python3/bin/python3.11 prefix: see this file's other "Bug
+     * (2026-09-24" comment - relying on bin/yt-dlp's own shebang always
+     * picks the device's system python3, which has no working zlib. */
     snprintf(cmd, sizeof(cmd),
-        "/bin/sh -lc \"\\\"%s/bin/yt-dlp\\\" --flat-playlist --no-warnings --no-playlist "
+        "/bin/sh -lc \"\\\"%s/bin/python3/bin/python3.11\\\" \\\"%s/bin/yt-dlp\\\" --flat-playlist --no-warnings --no-playlist "
         "--extractor-args 'youtube:player_skip=js' "
         "--print '%%(id)s\\t%%(title)s\\t%%(channel)s\\t%%(duration_string)s' "
         "\\\"ytsearch%d:%s\\\" 2>/dev/null\"",
-        inst->module_dir, SEARCH_MAX_RESULTS, clean_query);
+        inst->module_dir, inst->module_dir, SEARCH_MAX_RESULTS, clean_query);
 
     fp = popen(cmd, "r");
     if (!fp) {
@@ -1611,12 +1644,15 @@ static int resolve_stream_url_legacy(const yt_instance_t *inst,
 
     if (!inst || !source_url || !media_url || media_url_len == 0) return -1;
 
+    /* bin/python3/bin/python3.11 prefix: see the "Bug (2026-09-24" comment
+     * on start_stream_legacy's own yt-dlp invocation above. */
     snprintf(cmd,
              sizeof(cmd),
-             "/bin/sh -lc \"\\\"%s/bin/yt-dlp\\\" --no-playlist "
+             "/bin/sh -lc \"\\\"%s/bin/python3/bin/python3.11\\\" \\\"%s/bin/yt-dlp\\\" --no-playlist "
              "--extractor-args 'youtube:player_skip=js' "
              "-f 'bestaudio[ext=m4a]/bestaudio' -g "
              "\\\"%s\\\" 2>/dev/null\"",
+             inst->module_dir,
              inst->module_dir,
              source_url);
 
@@ -2250,8 +2286,10 @@ static void *download_thread_main(void *arg) {
          * start_stream_legacy() above - same fix, same reason (an
          * HLS-only format needs yt-dlp's OWN ffmpeg, which otherwise
          * silently resolves to this device's TLS-less system one). */
+        /* bin/python3/bin/python3.11 prefix: see the "Bug (2026-09-24"
+         * comment on start_stream_legacy()'s own yt-dlp invocation. */
         snprintf(cmd, sizeof(cmd),
-            "\"%s/bin/yt-dlp\" --no-playlist "
+            "\"%s/bin/python3/bin/python3.11\" \"%s/bin/yt-dlp\" --no-playlist "
             "--ffmpeg-location \"%s/bin/ffmpeg\" "
             "%s"
             "-f \"%s\" -o - '%s' 2>/dev/null | "
@@ -2260,7 +2298,7 @@ static void *download_thread_main(void *arg) {
             "-af \"aresample=44100\" "
             "-ac 2 -ar 44100 '%s' -y "
             "2>>" WS_RUNTIME_LOG_PATH,
-            inst->module_dir, inst->module_dir, extractor_args, legacy_fmt,
+            inst->module_dir, inst->module_dir, inst->module_dir, extractor_args, legacy_fmt,
             inst->download_source_url,
             inst->module_dir, out_path);
         yt_log("download_thread: using yt-dlp fallback");
