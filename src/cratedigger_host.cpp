@@ -1096,6 +1096,30 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* The device's Python (/usr/bin/python3 -> AddOns/Python/python3.8) has
+     * no `zlib` module built in at all - yt-dlp hard-requires it and refuses
+     * to even start without it ("yt-dlp is unavailable"), which silently
+     * broke every SEARCH/DOWNLOAD. Rather than touch the device's shared
+     * system Python (used by nodeServer and other addons too, and it
+     * wouldn't survive a MockbaMod Python update), bin/pylib/ ships a
+     * private zlib.cpython-38-arm-linux-gnueabihf.so built by
+     * scripts/build-pyzlib.sh - self-contained, statically linked against
+     * zlib 1.3.1's own source, no dependency on the device's own
+     * /usr/lib/libz.so.1. Prepending it to PYTHONPATH here, before
+     * create_instance() spawns the yt-dlp daemon child (execlp("python3",
+     * ...) in yt_stream_plugin.c), makes python3's `import zlib` resolve to
+     * it via ordinary environment inheritance across fork()/exec() - no
+     * change needed in that vendored upstream file. Verified live
+     * (2026-09-23): SEARCH against yt/archive/soundcloud all went from
+     * "yt-dlp is unavailable" to real results with this in place. */
+    {
+        std::string pylib_path = module_dir + "/bin/pylib";
+        const char *existing = getenv("PYTHONPATH");
+        std::string new_path = (existing && *existing)
+            ? (pylib_path + ":" + existing) : pylib_path;
+        setenv("PYTHONPATH", new_path.c_str(), 1);
+    }
+
     if (!shm_setup()) { fprintf(stderr, "[cratedigger] shared memory setup failed\n"); return 1; }
 
     g_api = move_plugin_init_v2(nullptr);

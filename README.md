@@ -173,11 +173,14 @@ for visual consistency between the two surfaces.
 
 Requires Docker with armhf emulation (see
 `force-acid/scripts/build.sh`'s own comment for the one-time
-`qemu-user-static` setup on a bare dockerd).
+`qemu-user-static` setup on a bare dockerd), and `zig` on `PATH` (or
+`ZIG=/path/to/zig`) for `build-pyzlib.sh` — see its own header for why
+(same cross-compiler force-audioin uses; that step needs no Docker).
 
 ```sh
-./scripts/build-deps.sh   # fetch yt-dlp + ffmpeg/ffprobe (see Known Limitations re: deno)
-./scripts/build.sh        # compile cratedigger_host, assemble dist/ForceCrateDigger/
+./scripts/build-deps.sh    # fetch yt-dlp + ffmpeg/ffprobe (see Known Limitations re: deno)
+./scripts/build-pyzlib.sh  # build the private zlib module yt-dlp needs (see below)
+./scripts/build.sh         # compile cratedigger_host, assemble dist/ForceCrateDigger/
 ```
 
 `dist/ForceCrateDigger/` is the full addon folder, ready to deploy.
@@ -261,6 +264,23 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
 
 ## Known limitations (differences from the Move original)
 
+- **The device's Python has no `zlib` module — worked around, not a device
+  fix.** `/usr/bin/python3` (this MockbaMod build's bundled Python 3.8.10)
+  was built without `zlib` support at all — confirmed live:
+  `import zlib` raises `ModuleNotFoundError`, and without it yt-dlp refuses
+  to even start ("yt-dlp is unavailable"), silently breaking every SEARCH
+  and DOWNLOAD. `scripts/build-pyzlib.sh` builds a private, self-contained
+  `zlib.cpython-38-arm-linux-gnueabihf.so` (statically linked against real
+  zlib 1.3.1 source — no dependency on the device's own libraries) into
+  `bin/pylib/`, and `cratedigger_host.cpp`'s `main()` puts that on
+  `PYTHONPATH` before spawning the yt-dlp daemon child — self-contained,
+  no shared system file touched. Verified live (2026-09-23): SEARCH against
+  `yt`/`archive`/`sc` all went from "yt-dlp is unavailable" to real results.
+  DOWNLOAD has separate, provider-specific issues unrelated to zlib (seen:
+  YouTube's own "the page needs to be reloaded" signature-cipher error on
+  two videos — likely the same weaker-JS-interpreter limitation noted below
+  for `deno`; and one SoundCloud preview stream failed in `ffmpeg` itself)
+  — not yet root-caused, flagged here rather than fixed.
 - **No `deno`.** Deno publishes no official armv7/armhf Linux build, only
   x86_64 and aarch64. yt-dlp falls back to its own built-in JS
   interpreter for YouTube signature-cipher extraction — works for most

@@ -74,7 +74,7 @@ docker run --rm --platform "$PLATFORM" \
   chmod 0755 dist/ForceCrateDigger/web/manage.sh dist/ForceCrateDigger/web/run_cratedigger_web.sh
 
   if [ -d build/deps/bin ]; then
-    cp build/deps/bin/* dist/ForceCrateDigger/bin/
+    cp build/deps/bin/* dist/ForceCrateDigger/bin/ 2>/dev/null || true
     chmod 0755 dist/ForceCrateDigger/bin/* || true
     echo "-- bundled runtime deps --"
     ls -la dist/ForceCrateDigger/bin
@@ -82,6 +82,22 @@ docker run --rm --platform "$PLATFORM" \
     echo "!! build/deps/bin not found — run scripts/build-deps.sh first for a"
     echo "!! self-contained bundle, or copy your own yt-dlp/ffmpeg/ffprobe"
     echo "!! into dist/ForceCrateDigger/bin/ by hand before deploying."
+  fi
+
+  # The device'\''s Python has no zlib module at all - yt-dlp refuses to even
+  # start without it. build-pyzlib.sh builds a private, self-contained
+  # zlib.cpython-38-arm-linux-gnueabihf.so for it; cratedigger_host.cpp puts
+  # bin/pylib/ on PYTHONPATH before spawning the yt-dlp daemon. See both
+  # files'\'' comments for the full story.
+  if [ -f build/deps/bin/pylib/zlib.cpython-38-arm-linux-gnueabihf.so ]; then
+    mkdir -p dist/ForceCrateDigger/bin/pylib
+    cp build/deps/bin/pylib/zlib.cpython-38-arm-linux-gnueabihf.so dist/ForceCrateDigger/bin/pylib/
+    echo "-- bundled private zlib module --"
+    ls -la dist/ForceCrateDigger/bin/pylib
+  else
+    echo "!! build/deps/bin/pylib/zlib.cpython-38-*.so not found — run"
+    echo "!! scripts/build-pyzlib.sh first, or yt-dlp will refuse to start"
+    echo "!! on-device (\"yt-dlp is unavailable\") with no zlib module."
   fi
 
   ls -la dist dist/ForceCrateDigger
