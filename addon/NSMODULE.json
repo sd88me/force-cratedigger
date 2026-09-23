@@ -1,6 +1,6 @@
 {
   "NAME": "Crate Digger",
-  "DESCRIPTION": "Random music discovery via Discogs crate-dig - filter by genre/style/decade/country, browse hits, and play them as a Force sound-generator voice. Built on Charles Vestal's schwung-webstream for Ableton Move (MIT); its other providers (YouTube/SoundCloud/archive.org/Freesound search) are still present in the engine but not exposed by this addon's own UI. Requires the separate ForceAudioIn addon to be enabled (arms the shared injection tap at boot, zero voices) - this toggle only starts/stops the cratedigger_host process itself, no LD_PRELOAD/acvs involved. Also requires bin/yt-dlp and bin/ffmpeg to be present in this addon's folder - see README.md/scripts/build-deps.sh. Autoload is deliberately unavailable: always start it after boot, from this page.",
+  "DESCRIPTION": "Random music discovery via Discogs crate-dig - filter by genre/style/decade/country, browse hits, and play them as a Force sound-generator voice. Built on Charles Vestal's schwung-webstream for Ableton Move (MIT); its other providers (YouTube/SoundCloud/archive.org/Freesound search) are still present in the engine but not exposed by this addon's own UI. Requires the separate ForceAudioJack addon to be enabled (arms the shared injection tap at boot, zero voices) - this toggle only starts/stops the cratedigger_host process itself, no LD_PRELOAD/acvs involved. Also requires bin/yt-dlp and bin/ffmpeg to be present in this addon's folder - see README.md/scripts/build-deps.sh. Autoload is deliberately unavailable: always start it after boot, from this page.",
   "PROCESSNAME": "cratedigger_host",
   "DIRNAME": "ForceCrateDigger",
   "FILENAME": "cratedigger_host",
@@ -12,7 +12,7 @@
     { "NAME": "ctrl-sock flag", "VALUE": "--ctrl-sock" },
     { "NAME": "control socket path", "VALUE": "/tmp/cratedigger_ctrl.sock" },
     { "NAME": "mix-slot flag", "VALUE": "--mix-slot" },
-    { "NAME": "forceAudioIn voice slot (0-3)", "VALUE": "0" },
+    { "NAME": "forceAudioJack voice slot (0-3)", "VALUE": "0" },
     { "NAME": "skipback-nsmodule-path flag", "VALUE": "--skipback-nsmodule-path" },
     { "NAME": "path to ForceAudioJackSkipback's own NSMODULE.json - EDIT to your device's real mmPath, see README", "VALUE": "/media/CHANGE_ME/AddOns/ForceAudioJackSkipback/NSMODULE.json" }
   ]

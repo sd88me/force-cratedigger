@@ -4,7 +4,7 @@
 # ForceMazeVoice/run_maze_host.sh).
 #
 # This addon never arms any LD_PRELOAD tap or auto-starts cratedigger_host at
-# boot - that's ForceAudioIn's job now (see its own README.md), and
+# boot - that's ForceAudioJack's job now (see its own README.md), and
 # cratedigger_host is only ever started on demand via the nodeServer Modules
 # page (/moduler), never at boot. NSMODULE.json also sets
 # AUTOLAUNCHABLE:false for this reason.

@@ -37,7 +37,7 @@ browser to see it, or read the file directly.
 - **Engine** (`cratedigger_host`): a native armhf process that links the
   ported DSP core directly, renders decoded audio in real time, and mixes
   it into the Force's own audio output via the
-  [force-audioin](https://github.com/sd88me/force-audioin) shared-memory
+  [force-audio-jack](https://github.com/sd88me/force-audio-jack) shared-memory
   tap (the same mechanism [force-maze](../force-maze)'s Maze Voice port
   uses). Forces `search_provider` to `cratedig` at startup — the engine's
   other providers are still fully present, just not reachable from this
@@ -53,24 +53,21 @@ browser to see it, or read the file directly.
   direct `SHIFT+SCENE-N` hardware combos were already claimed by other
   addons on this device by the time this one was built (edit `page=` in
   `shadow_page.conf` if your own device has a free slot 1-7 and you'd
-  rather have a direct combo). Two tabs:
-  - **PLAY** — transport, output gain/routing, engine on/off, a
-    **Skipback Rec** button, a results list (tap to play), and its own
-    **SEARCH** button so a filter set on the FILTERS tab can be re-run
-    without switching tabs.
-  - **FILTERS** — five steppers (Genre, Style, Decade, Region, Country —
-    Style depends on the current Genre, Country on the current Region)
-    and a dedicated **SEARCH DISCOGS** button, same "nothing searches
-    until you press it" behavior as the web GUI.
+  rather have a direct combo).
+
+  | Tab | Contents |
+  |-----|----------|
+  | PLAY | Transport, output gain/routing, engine on/off, a **Skipback Rec** button, a results list (tap to play), and its own **SEARCH** button so a filter set on the FILTERS tab can be re-run without switching tabs |
+  | FILTERS | Five steppers (Genre, Style, Decade, Region, Country — Style depends on the current Genre, Country on the current Region) and a dedicated **SEARCH DISCOGS** button, same "nothing searches until you press it" behaviour as the web GUI |
 - **Skipback Rec**: a red button (both GUIs) that starts/stops
-  [force-audioin](https://github.com/sd88me/force-audioin)'s separate
+  [force-audio-jack](https://github.com/sd88me/force-audio-jack)'s separate
   `skipbackHost` process — continuous rolling-buffer recording of the
   Force's real main mix, so a `SHIFT+RECORD` shortcut can save the last
   N seconds retroactively. This addon doesn't run or own that process;
   the button fires the same nodeServer `/moduler/UPDATE` start/stop
   call the on-device Modules page itself uses (see
   `cratedigger_host.cpp`'s `send_skipback_toggle()`). Requires
-  force-audioin's Force Audio Jack feature to actually be installed and
+  force-audio-jack's Skipback feature to actually be installed and
   its own tap armed — this button only starts/stops `skipbackHost`
   itself, same "toggling here doesn't arm the underlying tap" caveat
   ForceAudioJackSkipback's own `NSMODULE.json` states.
@@ -79,7 +76,7 @@ browser to see it, or read the file directly.
   title (and channel) — plus its tempo, *if the data source actually
   has one for that track* — to `/tmp/force_nowplaying.txt`, a generic
   "now playing" convention any addon could use. A patched
-  `skipbackHost.c` (force-audioin repo) checks that file before falling
+  `skipbackHost.c` (force-audio-jack repo) checks that file before falling
   back to its usual Force-project-name/tempo lookup, so a skipback
   recording taken while a track is playing is named after the track
   instead of the current Force project — and, if the data source
@@ -175,7 +172,7 @@ Requires Docker with armhf emulation (see
 `force-acid/scripts/build.sh`'s own comment for the one-time
 `qemu-user-static` setup on a bare dockerd), and `zig` on `PATH` (or
 `ZIG=/path/to/zig`) for `build-pyzlib.sh` — see its own header for why
-(same cross-compiler force-audioin uses; that step needs no Docker).
+(same cross-compiler force-audio-jack uses; that step needs no Docker).
 
 ```sh
 ./scripts/build-deps.sh    # fetch yt-dlp + ffmpeg/ffprobe (see Known Limitations re: deno)
@@ -225,7 +222,7 @@ ssh root@<force-ip> '"<mmPath>/AddOns/ForceCrateDigger/web/manage.sh" ENABLE'
 
 Then, separately:
 
-1. Make sure [ForceAudioIn](https://github.com/sd88me/force-audioin) is
+1. Make sure [ForceAudioJack](https://github.com/sd88me/force-audio-jack) is
    enabled (its own `manage.sh ENABLE`) — it arms the shared audio tap
    this addon writes into. It is a hard dependency for audio output.
 2. Start `cratedigger_host` itself from the nodeServer Modules page
@@ -308,7 +305,7 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
 - **Whether the injected audio actually reaches Skipback depends on the
   Force's own Audio-In routing, which this addon can't see or control.**
   cratedigger injects its output as an Audio-In signal
-  ([force-audioin](https://github.com/sd88me/force-audioin)'s own In-bus),
+  ([force-audio-jack](https://github.com/sd88me/force-audio-jack)'s own In-bus),
   and Skipback only ever records the Main mix. For that signal to actually
   reach Main (and therefore get captured), MPC needs an Audio-In track
   created and routed/faded up into Main *in the current project* — normal
@@ -322,7 +319,7 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
   audio comes out silent, check this first.
 - Downloads land in `/sdcard/Force Documents/Samples/CrateDigger`, the
   same stable, serial-independent output-dir convention
-  [force-audioin](https://github.com/sd88me/force-audioin)'s own Skipback
+  [force-audio-jack](https://github.com/sd88me/force-audio-jack)'s own Skipback
   feature (`src/skipbackHost.c`'s `DEFAULT_OUTPUT_DIR`) uses — `/sdcard`
   is the Force's own internal-storage mount, not a removable card's
   `/media/<serial>/...` path, and "Force Documents/Samples" is where the
@@ -361,7 +358,7 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
   `UPSTREAM_THIRD_PARTY_NOTICES.md`.
 - **New for this port**: the Force host shim (`src/cratedigger_host.cpp`),
   the audio-injection wiring (`src/forceAudioInject.h`, vendored from
-  [force-audioin](https://github.com/sd88me/force-audioin)), the crate-
+  [force-audio-jack](https://github.com/sd88me/force-audio-jack)), the crate-
   dig-focused browser web GUI and vintage-MPC theme (`addon/web/`), the
   shadow GUI page and its own take on the same theme
   (`addon/shadow_page.conf`), and all build/deploy/addon-manager scripts.
@@ -373,7 +370,7 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
 (Discogs search → YouTube playback → Skipback recording, verified
 end-to-end with genuine audible output). See that release's notes for
 what shipped in it. The sibling repos this one was built alongside
-(`force-shadow`, `force-dx7`, `force-maze`, `force-audioin`) tag releases
+(`force-shadow`, `force-dx7`, `force-maze`, `force-audio-jack`) tag releases
 as `gh release create <tag> --target <branch> --title … --notes …`, one
 version scheme per repo (e.g. `force-shadow` uses `v1.0.0`, `force-maze`
 tags per-module like `maze-voice-v1.0.0`) — see that convention (and the
