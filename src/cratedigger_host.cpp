@@ -1156,6 +1156,23 @@ int main(int argc, char **argv) {
     while (g_run.load()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     timer.join();
+    /* ctrl_server_loop is blocked in accept() on lfd, and needs to be
+     * unblocked before ctrl.join() below - leaving `ctrl` joinable when its
+     * destructor runs at the end of main() calls std::terminate() by
+     * design, aborting the whole process (confirmed live: SIGTERM'ing a
+     * manually-started cratedigger_host produced a SIGABRT coredump with
+     * _ZSt9terminatev in it - the graceful-shutdown path itself was
+     * crashing, from an unjoined thread this code never used to join at
+     * all). shutdown(), not close(): plain close(lfd) here does NOT
+     * reliably wake a concurrent accept() blocked on the same fd in
+     * another thread on Linux (well-known behavior - the wakeup is
+     * unspecified/racy) - confirmed live, an earlier close()-only version
+     * of this fix just hung forever instead of crashing. shutdown(lfd,
+     * SHUT_RDWR) on a listening socket IS documented Linux behavior to
+     * unblock a pending accept() with an error, then close() releases the
+     * fd itself. */
+    shutdown(lfd, SHUT_RDWR);
+    ctrl.join();
     close(lfd);
     unlink(g_ctrl_sock_path.c_str());
     clear_nowplaying_file();
