@@ -157,7 +157,7 @@
   </div>
   <div class="row" style="margin-top:10px;">
     <button class="skipback" id="skipbackBtn">Skipback Rec</button>
-    <span class="msg" id="skipbackMsg">stopped</span>
+    <span class="msg" id="skipbackMsg">not armed</span>
   </div>
 </div>
 
@@ -327,9 +327,14 @@ $("downloadBtn").addEventListener("click", async () => {
   setMsg($("downloadMsg"), r.ok ? "Started." : "Failed to start.", r.ok ? "ok" : "err");
 });
 
+let skipbackMsgUntil = 0;
 $("skipbackBtn").addEventListener("click", async () => {
+  // Momentary trigger, same as the physical SHIFT+RECORD shortcut -
+  // asks the separate, already-running skipbackHost to flush its
+  // rolling buffer to a WAV right now. Does not start/stop anything.
   const r = await api("POST", "/param", { key: "skipback_toggle", value: "go" });
-  if (!r.ok) setMsg($("skipbackMsg"), "engine not running", "err");
+  skipbackMsgUntil = Date.now() + 3000;  // hold this over pollState's own overwrite
+  setMsg($("skipbackMsg"), r.ok ? "Saved." : "Not armed - enable Skipback first.", r.ok ? "ok" : "err");
 });
 
 let gainDirty = false;
@@ -362,9 +367,11 @@ async function pollState() {
       setMsg($("downloadMsg"), state.download_status === "done" ? ("Saved: " + state.download_path)
         : (state.download_error || state.download_status), t);
     }
-    const recording = state.skipback_status === "RECORDING";
-    $("skipbackBtn").classList.toggle("recording", recording);
-    setMsg($("skipbackMsg"), state.skipback_status ? state.skipback_status.toLowerCase() : "unknown");
+    const armed = state.skipback_status === "RECORDING";
+    $("skipbackBtn").classList.toggle("recording", armed);
+    if (Date.now() >= skipbackMsgUntil) {
+      setMsg($("skipbackMsg"), armed ? "armed" : (state.skipback_status ? "not armed" : "unknown"));
+    }
   }
   setTimeout(pollState, 2000);
 }

@@ -57,20 +57,20 @@ browser to see it, or read the file directly.
 
   | Tab | Contents |
   |-----|----------|
-  | PLAY | Transport, output gain/routing, engine on/off, a **Skipback Rec** button, a results list (tap to play), and its own **SEARCH** button so a filter set on the FILTERS tab can be re-run without switching tabs |
+  | PLAY | Transport, output gain/routing, a **Skipback Rec** button, a results list (tap to play), and its own **SEARCH** button so a filter set on the FILTERS tab can be re-run without switching tabs. No POWER toggle — the engine starts/stops itself as you enter/leave this page. |
   | FILTERS | Five steppers (Genre, Style, Decade, Region, Country — Style depends on the current Genre, Country on the current Region) and a dedicated **SEARCH DISCOGS** button, same "nothing searches until you press it" behaviour as the web GUI |
-- **Skipback Rec**: a red button (both GUIs) that starts/stops
-  [force-audio-jack](https://github.com/sd88me/force-audio-jack)'s separate
-  `skipbackHost` process — continuous rolling-buffer recording of the
-  Force's real main mix, so a `SHIFT+RECORD` shortcut can save the last
-  N seconds retroactively. This addon doesn't run or own that process;
-  the button fires the same nodeServer `/moduler/UPDATE` start/stop
-  call the on-device Modules page itself uses (see
-  `cratedigger_host.cpp`'s `send_skipback_toggle()`). Requires
-  force-audio-jack's Skipback feature to actually be installed and
-  its own tap armed — this button only starts/stops `skipbackHost`
-  itself, same "toggling here doesn't arm the underlying tap" caveat
-  ForceAudioJackSkipback's own `NSMODULE.json` states.
+- **Skipback Rec**: a red button (both GUIs) that behaves exactly like
+  the physical `SHIFT+RECORD` shortcut — it asks
+  [force-audio-jack](https://github.com/sd88me/force-audio-jack)'s
+  separate `skipbackHost` process to flush its rolling buffer (the last
+  N seconds of the Force's real main mix, continuously recorded) to a
+  WAV right now. This addon doesn't run, own, or start/stop that
+  process — `skipbackHost` needs to already be enabled *and running*
+  (started once from the nodeServer Modules page, like any other engine
+  in this family) for the button to do anything; tapping it just touches
+  `skipbackHost`'s own trigger-marker file (see
+  `cratedigger_host.cpp`'s `trigger_skipback_save()`). If it's not
+  running, the button reports that rather than silently doing nothing.
 
   Whenever this addon plays a search result, it writes the track's
   title (and channel) — plus its tempo, *if the data source actually
@@ -192,11 +192,11 @@ scripts/deploy.sh root@<force-ip>
 One command copies `dist/ForceCrateDigger/` onto the device, patches the
 two files that hardcode absolute addon-install paths
 (`addon/NSMODULE.json` and `addon/shadow_page.conf` both ship with the
-literal sentinel `/media/CHANGE_ME` in place of the real, per-device
+literal sentinel `/media/<serial>` in place of the real, per-device
 `mmPath` — MockbaMod addon paths vary by SD card, so a build step can't
 know it in advance) to the real path this script already looked up, then
-runs `manage.sh ENABLE` for both the engine and the web GUI. The two
-files' path occurrences (including the one embedded in
+runs `manage.sh ENABLE` for the engine (the web GUI's own `manage.sh`
+too). The two files' path occurrences (including the one embedded in
 `shadow_page.conf`'s `engine_arguments_json`, which force-shadow's engine
 on/off button re-sends verbatim to nodeServer) must stay byte-for-byte
 identical — patching both from one source value, instead of hand-editing
@@ -207,25 +207,27 @@ This is equivalent to, and replaces, manually running:
 ```sh
 ssh root@<force-ip> "rm -rf '<mmPath>/AddOns/ForceCrateDigger'"
 scp -r dist/ForceCrateDigger root@<force-ip>:<mmPath>/AddOns/ForceCrateDigger
-ssh root@<force-ip> "sed -i 's|/media/CHANGE_ME|<mmPath>|g' '<mmPath>/AddOns/ForceCrateDigger/NSMODULE.json' '<mmPath>/AddOns/ForceCrateDigger/shadow_page.conf'"
+ssh root@<force-ip> "sed -i 's|/media/<serial>|<mmPath>|g' '<mmPath>/AddOns/ForceCrateDigger/NSMODULE.json' '<mmPath>/AddOns/ForceCrateDigger/shadow_page.conf'"
 ssh root@<force-ip> '"<mmPath>/AddOns/ForceCrateDigger/manage.sh" ENABLE'
 ssh root@<force-ip> '"<mmPath>/AddOns/ForceCrateDigger/web/manage.sh" ENABLE'
 ```
 
 (get `mmPath` from the device with `cat /dev/shm/.mmPath` over SSH).
 
-Two things `deploy.sh` does **not** do for you — printed as a reminder when
-it finishes:
+What `deploy.sh` does **not** do for you — printed as a reminder when it
+finishes:
 
 1. Enable the separate [ForceAudioJack](https://github.com/sd88me/force-audio-jack)
    addon (its own `manage.sh ENABLE`) — it arms the shared audio tap this
    addon writes into. It is a hard dependency for audio output.
-2. Start `cratedigger_host` itself from the nodeServer Modules page
-   (`http://<force-ip>:8080/moduler`) or via the shadow page's own engine
-   button (ADD-ONS launcher → CRATE DIGGER, or your own device's combo if
-   you moved it to a free 1-7 slot) — it does **not** auto-launch at boot
-   (see `addon/NSMODULE.json`'s `AUTOLAUNCHABLE: false` and the comment in
-   `addon/manage.sh`).
+2. Enable *and start* the separate `ForceAudioJackSkipback` addon, if you
+   want the **Skipback Rec** button to do anything (see
+   [Features](#features) above) — it needs to already be running for the
+   button's trigger to have a buffer to save; the button never starts it.
+
+`cratedigger_host` itself starts/stops automatically as you enter/leave
+the Crate Digger shadow page (`engine_autostart=1`) — no manual toggle
+needed, and it never auto-launches at boot.
 
 Once enabled, browse to `http://<force-ip>:8308/` for the web GUI (always
 running once its own addon is enabled, independent of whether the engine

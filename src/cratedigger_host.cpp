@@ -113,28 +113,23 @@ static std::string g_ctrl_sock_path = "/tmp/cratedigger_ctrl.sock";
 static bool         g_verbose = false;
 static unsigned     g_mix_slot = 0;    /* which /forceAudioInjectN this instance owns */
 
-/* Skipback (force-audioin's "Force Audio Jack - Skipback" addon,
- * skipbackHost) is a separate companion process, not something this
- * addon owns or spawns directly — see the SKIPBACK REC button's own
- * comment further down for why toggling it goes through nodeServer's
- * moduler endpoint exactly the way Force Shadow's own engine on/off
- * button does, rather than this process fork/exec-ing it itself. Same
- * per-device mmPath problem every other NSMODULE path in this project
- * has (see README.md) — override with --skipback-nsmodule-path. */
-static std::string g_skipback_nsmodule_path =
-    "/media/CHANGE_ME/AddOns/ForceAudioJackSkipback/NSMODULE.json";
+/* Skipback (force-audio-jack's "Force Audio Jack - Skipback" addon,
+ * skipbackHost) is a separate companion process this addon does not
+ * own, start, or stop — it's meant to already be running continuously
+ * (started once from the nodeServer Modules page, same as any other
+ * engine in this family), recording the real main-mix output into its
+ * own rolling buffer the whole time. The SKIPBACK REC button below does
+ * exactly what the physical SHIFT+RECORD shortcut does: touch
+ * skipbackHost's own trigger-marker file to ask it to flush that
+ * buffer to a WAV right now (see skipbackHost.c's own trigger-handling
+ * comment in the force-shadow repo) — it does NOT start or stop
+ * skipbackHost itself. An earlier version of this button toggled
+ * skipbackHost's own RUNNING state via nodeServer's moduler endpoint,
+ * which is wrong: it meant tapping it to "save the last 30 seconds"
+ * actually started/stopped the recorder instead, so it never behaved
+ * like the real shortcut. */
 static const char *SKIPBACK_PROCESSNAME = "skipbackHost";
-static const char *SKIPBACK_DIRNAME = "ForceAudioJackSkipback";
-/* Verbatim from that addon's own NSMODULE.json ARGUMENTS array — must be
- * kept byte-for-byte in sync with it by hand (same fragility Force
- * Shadow's own engine_arguments_json has, see shadow_page.conf's
- * comment on that) since nodeServer's moduler endpoint overwrites the
- * real NSMODULE.json with whatever ARGUMENTS this sends. */
-static const char *SKIPBACK_ARGUMENTS_JSON =
-    "[{\"NAME\":\"window flag\",\"VALUE\":\"--window-sec\"},"
-    "{\"NAME\":\"rolling window seconds (max 60)\",\"VALUE\":\"30\"},"
-    "{\"NAME\":\"output-dir flag\",\"VALUE\":\"--output-dir\"},"
-    "{\"NAME\":\"output folder\",\"VALUE\":\"/sdcard/Force Documents/Samples/Skipback\"}]";
+static const char *SKIPBACK_TRIGGER_MARKER = "/tmp/forceAudioJack.skipback";
 
 /* ---------------------------------------------------------------------------
  * Shared-memory ring setup (producer side) — identical in shape to
@@ -313,14 +308,17 @@ static void timer_loop() {
  *    lowercase words that would render the same way search results did
  *    before the fix above. playback_time is exempt (digits + ':' only,
  *    already safe) so its readout uses the plain key directly.
- *  - "skipback_toggle" (SET, any value) / "skipback_running" (GET, "1"/
- *    "0") / "skipback_status" (GET, "RECORDING"/"STOPPED" - already
- *    upper-case ASCII, so this one key serves both GUIs, no "_shadow"
- *    variant needed) — start/stop force-audioin's separate skipbackHost
- *    process via nodeServer's /moduler/UPDATE endpoint, the same
- *    mechanism Force Shadow's own engine on/off button uses. See
- *    send_skipback_toggle()'s own comment for why this goes through
- *    nodeServer rather than this process spawning skipbackHost itself.
+ *  - "skipback_toggle" (SET, any value — a momentary trigger, not a
+ *    real toggle, see trigger_skipback_save()'s own comment) /
+ *    "skipback_running" (GET, "1"/"0") / "skipback_status" (GET,
+ *    "RECORDING"/"STOPPED" - already upper-case ASCII, so this one key
+ *    serves both GUIs, no "_shadow" variant needed) — ask
+ *    force-audio-jack's separate skipbackHost process, which must
+ *    already be running (started once from the nodeServer Modules page,
+ *    not by this addon), to flush its rolling buffer to a WAV right
+ *    now, by touching its trigger-marker file — exactly what the
+ *    physical SHIFT+RECORD shortcut does. This process never starts or
+ *    stops skipbackHost itself.
  *    Playing a result (play_result_index above) also writes the track's
  *    title/channel, and its tempo if the source actually has one (see
  *    write_nowplaying_file()'s own comment — Discogs itself never does,
@@ -420,49 +418,23 @@ static bool skipback_is_running() {
     return found;
 }
 
-static void send_skipback_toggle(bool want_running) {
-    char body[1024];
-    int blen = std::snprintf(body, sizeof(body),
-        "{\"CONFIGFILE\":\"%s\",\"PROCESSNAME\":\"%s\",\"DIRNAME\":\"%s\","
-        "\"ARGUMENTS\":%s,\"RUNNING\":%s}",
-        g_skipback_nsmodule_path.c_str(), SKIPBACK_PROCESSNAME, SKIPBACK_DIRNAME,
-        SKIPBACK_ARGUMENTS_JSON, want_running ? "true" : "false");
-    if (blen < 0 || (size_t)blen >= sizeof(body)) {
-        fprintf(stderr, "[cratedigger] skipback_toggle: JSON body build failed/truncated\n");
-        return;
-    }
-
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) { perror("[cratedigger] skipback_toggle: socket"); return; }
-    struct timeval tv = { 1, 0 };
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(8080);
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-        char req[1536];
-        int rlen = std::snprintf(req, sizeof(req),
-            "POST /moduler/UPDATE HTTP/1.1\r\n"
-            "Host: 127.0.0.1\r\n"
-            "Content-Type: application/json\r\n"
-            "Content-Length: %d\r\n"
-            "Connection: close\r\n"
-            "\r\n%s",
-            blen, body);
-        if (rlen > 0 && (size_t)rlen < sizeof(req)) {
-            send(fd, req, (size_t)rlen, MSG_NOSIGNAL);
-            if (g_verbose) fprintf(stderr, "[cratedigger] skipback_toggle: sent RUNNING=%s\n",
-                                    want_running ? "true" : "false");
-        }
-    } else {
-        fprintf(stderr, "[cratedigger] skipback_toggle: connect to nodeServer failed: %s\n", strerror(errno));
+/* Touch skipbackHost's trigger-marker file, exactly what the physical
+ * SHIFT+RECORD shortcut does (a MidiLoop SCRIPT-N binding touches the
+ * same file - see skipbackHost.c's own header in the force-shadow
+ * repo). skipbackHost polls for this file's existence roughly every
+ * 200ms, unlinks it, and flushes its rolling buffer to a WAV - this
+ * process never writes the WAV itself, it only asks for one. Returns
+ * false only if the file couldn't even be created (e.g. /tmp missing),
+ * not on anything skipbackHost itself might fail to do afterward. */
+static bool trigger_skipback_save() {
+    int fd = open(SKIPBACK_TRIGGER_MARKER, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+    if (fd < 0) {
+        fprintf(stderr, "[cratedigger] skipback trigger: open(%s) failed: %s\n",
+                SKIPBACK_TRIGGER_MARKER, strerror(errno));
+        return false;
     }
     close(fd);
+    return true;
 }
 
 /* Must be called with g_lock already held. */
@@ -932,18 +904,23 @@ static void handle_ctrl_line(int fd, const std::string &line) {
              * pause/resume toggle below. */
         }
         if (!strcmp(key, "skipback_toggle")) {
-            bool now_running = skipback_is_running();
-            bool want_running = !now_running;
-            send_skipback_toggle(want_running);
-            /* Optimistic, same principle as the POWER pill's own instant-
-             * flip-then-self-correct (see force_shadow.c) -- the actual
-             * spawn/kill is a real nodeServer round trip (~500ms+), not
-             * worth blocking this reply on. */
+            /* Despite the key name (kept for GUI/API compatibility -
+             * both GUIs already send this exact key), this is a
+             * momentary trigger, not a start/stop toggle: skipbackHost
+             * is assumed already running (started once from the
+             * nodeServer Modules page, same as any other engine in this
+             * family) and continuously recording. Tapping this just asks
+             * it to flush its rolling buffer to a WAV right now - the
+             * same thing the physical SHIFT+RECORD shortcut does. */
+            bool running = skipback_is_running();
+            bool ok = running && trigger_skipback_save();
             {
                 std::lock_guard<std::mutex> lk(g_lock);
-                set_status_message(want_running ? "SKIPBACK REC STARTED" : "SKIPBACK REC STOPPED");
+                set_status_message(!running   ? "SKIPBACK NOT RUNNING"
+                                   : ok        ? "SKIPBACK SAVED"
+                                               : "SKIPBACK TRIGGER FAILED");
             }
-            send(fd, "OK\n", 3, 0);
+            send(fd, ok ? "OK\n" : "ERR\n", ok ? 3 : 4, 0);
             return;
         }
         if (!strcmp(key, "stop") || !strcmp(key, "stop_step")) {
@@ -1183,10 +1160,6 @@ static void usage(const char *me) {
         "  --module-dir PATH     dir containing module.json, bin/yt-dlp,\n"
         "                        bin/yt_dlp_daemon.py, bin/ffmpeg (default: .)\n"
         "  --ctrl-sock PATH      control socket path (default: /tmp/cratedigger_ctrl.sock)\n"
-        "  --skipback-nsmodule-path PATH\n"
-        "                        path to ForceAudioJackSkipback's own NSMODULE.json,\n"
-        "                        for the SKIPBACK REC button (default: a CHANGE_ME\n"
-        "                        placeholder - see README.md)\n"
         "  --mix-slot N          voice slot 0..%d for forceAudioJack.so (default: 0) -\n"
         "                        each simultaneous voice needs a distinct slot\n",
         me, AI_MAX_VOICES - 1);
@@ -1211,7 +1184,6 @@ int main(int argc, char **argv) {
         if      (a == "-v")                        g_verbose = true;
         else if (a == "--module-dir" && i+1 < argc) module_dir = argv[++i];
         else if (a == "--ctrl-sock"  && i+1 < argc) g_ctrl_sock_path = argv[++i];
-        else if (a == "--skipback-nsmodule-path" && i+1 < argc) g_skipback_nsmodule_path = argv[++i];
         else if (a == "--mix-slot" && i+1 < argc) {
             int s = std::atoi(argv[++i]);
             if (s < 0 || s >= AI_MAX_VOICES) { usage(argv[0]); return 2; }
