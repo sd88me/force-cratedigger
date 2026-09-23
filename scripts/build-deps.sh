@@ -6,9 +6,10 @@
 # architecture (armv7l/armhf — 32-bit, unlike Move's aarch64), which
 # changes where ffmpeg comes from and drops deno entirely:
 #
-#   - yt-dlp: unchanged from upstream. Built as a Python zipimport
-#     executable (`make lazy-extractors yt-dlp`), which is architecture-
-#     independent — it runs under any Python 3.8+, arm or not.
+#   - yt-dlp: unchanged from upstream. Fetched as upstream's own published
+#     release zipapp (see the comment at that step for why, and for the
+#     real-world bug this caught), which is architecture-independent — it
+#     runs under any Python 3.8+, arm or not.
 #   - ffmpeg/ffprobe: upstream's source (yt-dlp/FFmpeg-Builds) only
 #     publishes linux64/linuxarm64, no 32-bit ARM. johnvansickle.com's
 #     well-known static builds do publish an armhf variant — used here
@@ -37,23 +38,35 @@ require_cmd() {
 }
 require_cmd curl
 require_cmd tar
-require_cmd git
-require_cmd make
 require_cmd python3
 
-echo "=== Building yt-dlp (zipimport binary with lazy extractors) ==="
-YTDLP_DIR="$WORK_DIR/yt-dlp-src"
-if [ ! -d "$YTDLP_DIR/.git" ]; then
-  git clone --depth 1 https://github.com/yt-dlp/yt-dlp.git "$YTDLP_DIR"
-fi
-(
-  cd "$YTDLP_DIR"
-  git pull --ff-only || true
-  make clean >/dev/null 2>&1 || true
-  make lazy-extractors yt-dlp
-  cp yt-dlp "$OUT_DIR/yt-dlp"
-)
+echo "=== Fetching yt-dlp (official release zipapp, latest) ==="
+# Was previously built from source (`git clone` + `make lazy-extractors
+# yt-dlp`) - switched to fetching upstream's own published release asset
+# instead, for two reasons found live on 2026-09-23: (1) that build needs
+# a `zip` binary on the build host, which isn't always installed (this
+# host didn't have one, blocking a rebuild); (2) a stale bundled yt-dlp is
+# a real, silent failure mode, not a theoretical one - a build from months
+# ago (2024.10.22) was still deployed on a live device and caused every
+# YouTube-backed search result to fail with "The page needs to be
+# reloaded" (a signature-cipher extraction error, not the already-known
+# no-`deno` limitation this looked like at first).
+#
+# UPDATE 2026-09-23: back to "latest", not pinned. The pin above existed
+# because yt-dlp 2024.12.13 dropped Python 3.8 support entirely (hard
+# `sys.version_info` check, raises ImportError) and this addon's yt-dlp
+# used to run under the device's SYSTEM Python (3.8.10). That's no longer
+# true: scripts/build-python.sh bundles a private Python 3.11 specifically
+# so this addon can track yt-dlp's actual latest release (needed to keep
+# up with YouTube's evolving anti-bot JS challenge - see that script's
+# header) instead of being frozen in time. Run build-python.sh alongside
+# this script; without it, the fetched yt-dlp here will fail to even start
+# under the device's own system Python 3.8, same failure mode as before.
+curl -fsSL -o "$OUT_DIR/yt-dlp" \
+  "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
 chmod +x "$OUT_DIR/yt-dlp"
+YTDLP_VERSION="$(python3 "$OUT_DIR/yt-dlp" --version 2>/dev/null || echo unknown)"
+echo "-- fetched yt-dlp $YTDLP_VERSION (latest) --"
 
 echo "=== Downloading ffmpeg/ffprobe (johnvansickle.com armhf static) ==="
 FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-armhf-static.tar.xz"
@@ -72,12 +85,11 @@ chmod +x "$OUT_DIR/ffmpeg" "$OUT_DIR/ffprobe"
 "$OUT_DIR/ffmpeg" -version | head -n1 || echo "(ffmpeg is armhf — this host can't exec it to verify; that's expected off-device)"
 
 echo "=== Writing dependency manifest ==="
-YTDLP_COMMIT="$(cd "$YTDLP_DIR" && git rev-parse HEAD 2>/dev/null || true)"
-python3 - "$OUT_DIR" "$MANIFEST_PATH" "$YTDLP_COMMIT" "$FFMPEG_URL" <<'PY'
+python3 - "$OUT_DIR" "$MANIFEST_PATH" "$YTDLP_VERSION" "$FFMPEG_URL" <<'PY'
 import hashlib, json, os, sys
 from datetime import datetime, timezone
 
-out_dir, manifest_path, ytdlp_commit, ffmpeg_url = sys.argv[1:]
+out_dir, manifest_path, ytdlp_version, ffmpeg_url = sys.argv[1:]
 
 def sha256(path):
     h = hashlib.sha256()
@@ -95,9 +107,10 @@ manifest = {
     "artifacts": {
         "yt-dlp": {
             "source_repo": "https://github.com/yt-dlp/yt-dlp",
-            "source_ref": ytdlp_commit,
+            "release_version": ytdlp_version,
             "license": "Unlicense",
-            "note": "architecture-independent (Python zipimport executable)",
+            "note": "architecture-independent (Python zipimport executable), "
+                     "fetched as upstream's own published release asset",
             "sha256": sha256(os.path.join(out_dir, "yt-dlp")),
         },
         "ffmpeg": {

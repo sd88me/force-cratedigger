@@ -179,7 +179,8 @@ Requires Docker with armhf emulation (see
 
 ```sh
 ./scripts/build-deps.sh    # fetch yt-dlp + ffmpeg/ffprobe (see Known Limitations re: deno)
-./scripts/build-pyzlib.sh  # build the private zlib module yt-dlp needs (see below)
+./scripts/build-pyzlib.sh  # build the private zlib module (fallback, see Known Limitations)
+./scripts/build-python.sh  # fetch the private Python 3.11 yt-dlp actually runs under
 ./scripts/build.sh         # compile cratedigger_host, assemble dist/ForceCrateDigger/
 ```
 
@@ -276,17 +277,49 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
   `PYTHONPATH` before spawning the yt-dlp daemon child — self-contained,
   no shared system file touched. Verified live (2026-09-23): SEARCH against
   `yt`/`archive`/`sc` all went from "yt-dlp is unavailable" to real results.
-  DOWNLOAD has separate, provider-specific issues unrelated to zlib (seen:
-  YouTube's own "the page needs to be reloaded" signature-cipher error on
-  two videos — likely the same weaker-JS-interpreter limitation noted below
-  for `deno`; and one SoundCloud preview stream failed in `ffmpeg` itself)
-  — not yet root-caused, flagged here rather than fixed.
+  This module is only used as a PYTHONPATH fallback now — see the private
+  Python entry below, which supersedes it for the yt-dlp daemon itself.
+- **YouTube-backed playback needed a private, newer Python — not just a
+  newer yt-dlp.** yt-dlp dropped Python 3.8 support after release
+  `2024.10.22` (every later release hard-requires 3.9+), and the device's
+  system Python is 3.8.10. Being frozen at a two-year-old yt-dlp eventually
+  broke ALL YouTube-backed playback outright as YouTube's anti-bot JS
+  challenge kept evolving past what that old release could solve —
+  confirmed live 2026-09-23: even the first video ever uploaded to YouTube
+  failed to resolve. Since most Discogs previews resolve via YouTube, this
+  was a real release blocker, not a minor gap. Fixed the same way as the
+  zlib gap above — self-contained, no device-wide Python change:
+  `scripts/build-python.sh` fetches a private CPython 3.11
+  (`astral-sh/python-build-standalone`'s prebuilt `armv7-unknown-linux-
+  gnueabihf` build, no cross-compilation needed) into `bin/python3/`, and
+  `yt_stream_plugin.c`'s `start_daemon_locked()` execs that interpreter by
+  absolute path instead of the bare `python3` on `PATH`. This also means
+  `scripts/build-deps.sh` now fetches yt-dlp's actual **latest** release
+  again, not a pin — the whole point is being able to track it going
+  forward. Verified live: the same YouTube video that failed outright
+  before now streams in full and records cleanly via Skipback (once
+  Audio-In routing to Main is set up — see the note below).
 - **No `deno`.** Deno publishes no official armv7/armhf Linux build, only
   x86_64 and aarch64. yt-dlp falls back to its own built-in JS
-  interpreter for YouTube signature-cipher extraction — works for most
-  videos, but is a weaker fallback than deno for a minority of more
-  obfuscated challenges (crate-dig hits resolve via the same YouTube
-  pipeline once a match is found).
+  interpreter for YouTube signature-cipher extraction — this got much less
+  relevant once the bundled Python (and therefore yt-dlp) was current
+  again (see above), but is still a known-weaker fallback than deno for a
+  minority of more obfuscated challenges.
+- **Whether the injected audio actually reaches Skipback depends on the
+  Force's own Audio-In routing, which this addon can't see or control.**
+  cratedigger injects its output as an Audio-In signal
+  ([force-audioin](https://github.com/sd88me/force-audioin)'s own In-bus),
+  and Skipback only ever records the Main mix. For that signal to actually
+  reach Main (and therefore get captured), MPC needs an Audio-In track
+  created and routed/faded up into Main *in the current project* — normal
+  MPC session state, not something `cratedigger_host` or `forceAudioJack.so`
+  sets up automatically. Seen live: a Skipback capture came out as a
+  well-formed, correctly-timed, but totally silent WAV on two separate
+  occasions, both times traced to this routing not being active at capture
+  time (confirmed via `forceAudioJack.so`'s own diagnostics — the ring
+  buffers were flowing real data throughout, so this isn't a bug in the
+  injection or capture path itself). If a Skipback capture of Crate Digger
+  audio comes out silent, check this first.
 - Downloads land in `/sdcard/Force Documents/Samples/CrateDigger`, the
   same stable, serial-independent output-dir convention
   [force-audioin](https://github.com/sd88me/force-audioin)'s own Skipback

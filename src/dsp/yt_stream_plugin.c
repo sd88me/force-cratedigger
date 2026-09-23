@@ -301,6 +301,7 @@ static int start_daemon_locked(yt_instance_t *inst, char *err, size_t err_len) {
     pid_t pid;
     char daemon_path[1024];
     char ytdlp_path[1024];
+    char python_path[1024];
     char line[DAEMON_LINE_MAX];
 
     if (!inst) return -1;
@@ -328,6 +329,19 @@ static int start_daemon_locked(yt_instance_t *inst, char *err, size_t err_len) {
     if (pid == 0) {
         snprintf(daemon_path, sizeof(daemon_path), "%s/bin/yt_dlp_daemon.py", inst->module_dir);
         snprintf(ytdlp_path, sizeof(ytdlp_path), "%s/bin/yt-dlp", inst->module_dir);
+        /* Force-specific, not upstream: exec this addon's own bundled
+         * Python (scripts/build-python.sh), not the bare "python3" on
+         * PATH. The device's system Python is 3.8, which caps yt-dlp at
+         * its last 3.8-compatible release (2024.10.22) - and YouTube's
+         * anti-bot JS challenge moves fast enough that being frozen there
+         * eventually breaks ALL YouTube-backed playback outright, not
+         * just a minority of videos (confirmed live 2026-09-23). Using
+         * this addon's own private 3.11 interpreter instead means yt-dlp
+         * can track its own latest release going forward, independent of
+         * the device's system Python - see build-python.sh's header for
+         * the full reasoning and why this is bundled rather than a
+         * device-wide Python upgrade. */
+        snprintf(python_path, sizeof(python_path), "%s/bin/python3/bin/python3.11", inst->module_dir);
 
         dup2(parent_to_child[0], STDIN_FILENO);
         dup2(child_to_parent[1], STDOUT_FILENO);
@@ -335,7 +349,7 @@ static int start_daemon_locked(yt_instance_t *inst, char *err, size_t err_len) {
         close(parent_to_child[1]);
         close(child_to_parent[0]);
         close(child_to_parent[1]);
-        execlp("python3", "python3", daemon_path, ytdlp_path, (char *)NULL);
+        execl(python_path, "python3", daemon_path, ytdlp_path, (char *)NULL);
         _exit(127);
     }
 
@@ -951,8 +965,24 @@ static int start_stream_legacy(yt_instance_t *inst) {
         }
         inst->resume_offset_sec = 0.0;
 
+        /* --ffmpeg-location: a Force-specific addition, not upstream. For
+         * an HLS-only format (no direct http_mp3/m4a - common on
+         * SoundCloud, and yt-dlp may fall back to one even when a direct
+         * format was requested), yt-dlp needs to invoke ITS OWN ffmpeg to
+         * actually fetch the stream, before this pipeline's own
+         * bin/ffmpeg (piped in below) ever sees a byte. Without this flag
+         * yt-dlp finds whatever "ffmpeg" is first on PATH - on this
+         * device that's a years-old /usr/bin/ffmpeg used by other
+         * MockbaMod components, built without TLS support at all
+         * ("https protocol not found, recompile FFmpeg with openssl,
+         * gnutls or securetransport enabled") - silently breaking every
+         * HLS-backed source. Confirmed live 2026-09-23: identical
+         * SoundCloud URL failed via the daemon's own pipeline, worked
+         * standalone the moment --ffmpeg-location pointed at our bundled
+         * armhf static build. */
         snprintf(cmd, sizeof(cmd),
             "exec \"%s/bin/yt-dlp\" --no-playlist "
+            "--ffmpeg-location \"%s/bin/ffmpeg\" "
             "%s"
             "-f \"%s\" -o - \"%s\" 2>/dev/null | "
             "\"%s/bin/ffmpeg\" -hide_banner -loglevel error "
@@ -961,7 +991,7 @@ static int start_stream_legacy(yt_instance_t *inst) {
             "-i pipe:0 -vn -sn -dn "
             "-af \"aresample=%d\" "
             "-f s16le -ac 2 -ar %d pipe:1",
-            inst->module_dir, extractor_args, legacy_fmt, inst->stream_url,
+            inst->module_dir, inst->module_dir, extractor_args, legacy_fmt, inst->stream_url,
             inst->module_dir, ss_flag, MOVE_SAMPLE_RATE, MOVE_SAMPLE_RATE);
     }
 
@@ -2216,8 +2246,13 @@ static void *download_thread_main(void *arg) {
             legacy_fmt = "http_mp3_1_0/hls_mp3_1_0/bestaudio";
             extractor_args = "";
         }
+        /* --ffmpeg-location: see the identical comment in
+         * start_stream_legacy() above - same fix, same reason (an
+         * HLS-only format needs yt-dlp's OWN ffmpeg, which otherwise
+         * silently resolves to this device's TLS-less system one). */
         snprintf(cmd, sizeof(cmd),
             "\"%s/bin/yt-dlp\" --no-playlist "
+            "--ffmpeg-location \"%s/bin/ffmpeg\" "
             "%s"
             "-f \"%s\" -o - '%s' 2>/dev/null | "
             "\"%s/bin/ffmpeg\" -hide_banner -loglevel warning "
@@ -2225,7 +2260,7 @@ static void *download_thread_main(void *arg) {
             "-af \"aresample=44100\" "
             "-ac 2 -ar 44100 '%s' -y "
             "2>>" WS_RUNTIME_LOG_PATH,
-            inst->module_dir, extractor_args, legacy_fmt,
+            inst->module_dir, inst->module_dir, extractor_args, legacy_fmt,
             inst->download_source_url,
             inst->module_dir, out_path);
         yt_log("download_thread: using yt-dlp fallback");

@@ -100,6 +100,26 @@ docker run --rm --platform "$PLATFORM" \
     echo "!! on-device (\"yt-dlp is unavailable\") with no zlib module."
   fi
 
+  # Private, bundled Python 3.11 for the yt-dlp daemon (see
+  # scripts/build-python.sh'\''s header for the full story - short version:
+  # the device'\''s system Python is 3.8, which caps yt-dlp at a release from
+  # September 2024, and YouTube'\''s own anti-bot JS challenge moves fast
+  # enough that this eventually breaks ALL YouTube-backed playback, not
+  # just a minority of videos). yt_stream_plugin.c execs
+  # bin/python3/bin/python3.11 by absolute path directly, so this must be
+  # present at that exact path for the daemon to start at all.
+  if [ -x build/deps/bin/python3/bin/python3.11 ]; then
+    rm -rf dist/ForceCrateDigger/bin/python3
+    cp -R build/deps/bin/python3 dist/ForceCrateDigger/bin/python3
+    echo "-- bundled private Python --"
+    file dist/ForceCrateDigger/bin/python3/bin/python3.11
+    du -sh dist/ForceCrateDigger/bin/python3
+  else
+    echo "!! build/deps/bin/python3/bin/python3.11 not found — run"
+    echo "!! scripts/build-python.sh first, or the yt-dlp daemon will fail"
+    echo "!! to even start on-device (exec of a nonexistent path)."
+  fi
+
   ls -la dist dist/ForceCrateDigger
 '
 echo "== done -> dist/ForceCrateDigger/ =="
