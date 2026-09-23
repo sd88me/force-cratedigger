@@ -9,9 +9,9 @@
  *   dlopen(dsp.so), move_plugin_init_v2    links yt_stream_plugin.o, calls it directly
  *   render_block() per audio block         wall-clock timer thread -> render_block()
  *   set_param(key, "42") from a knob       a local control socket -> set_param()
- *   int16 stereo out via the mailbox       float32 into ForceAudioIn's shared-
+ *   int16 stereo out via the mailbox       float32 into ForceAudioJack's shared-
  *                                          memory ring (forceAudioInject.h) --
- *                                          forceAudioIn.so (LD_PRELOAD'd into
+ *                                          forceAudioJack.so (LD_PRELOAD'd into
  *                                          /usr/bin/MPC) mixes it into what MPC
  *                                          reads from its capture device.
  *
@@ -79,6 +79,34 @@ static void             *g_inst = nullptr;
 
 static ai_shm_t *g_shm = nullptr;
 static std::atomic<uint64_t> g_ring_drops{0};
+
+/* Transient status-bar confirmation (2026-09-24): the TRANSPORT tab's one
+ * STATUS readout (stream_status_shadow) only ever shows the stream's own
+ * derived state (streaming/paused/loading/...) - an action with no state
+ * of its own, like SKIPBACK REC, gave no feedback there at all (a tap
+ * either worked or silently didn't, with nothing on screen either way -
+ * confirmed live, indistinguishable from broken). Piggybacking on this
+ * same readout (per the request: fold it into the existing bar, don't
+ * add a separate one) rather than a second widget - set on any action
+ * worth confirming, shown in place of the real status for a few seconds,
+ * then reverts on its own. g_lock-protected like everything else here. */
+static std::string g_status_message;
+static std::chrono::steady_clock::time_point g_status_message_until;
+static const std::chrono::milliseconds STATUS_MESSAGE_TTL{3000};
+
+/* Must be called with g_lock already held. */
+static void set_status_message(const std::string &msg) {
+    g_status_message = msg;
+    g_status_message_until = std::chrono::steady_clock::now() + STATUS_MESSAGE_TTL;
+}
+
+/* Must be called with g_lock already held. Empty return = no active
+ * message, caller should fall through to the real status. */
+static std::string get_status_message_locked() {
+    if (g_status_message.empty()) return std::string();
+    if (std::chrono::steady_clock::now() >= g_status_message_until) return std::string();
+    return g_status_message;
+}
 
 static std::string g_module_json;      /* raw module.json, served for DESCRIBE */
 static std::string g_ctrl_sock_path = "/tmp/cratedigger_ctrl.sock";
@@ -159,7 +187,7 @@ static void ring_push(const float *interleaved, uint32_t frames) {
 /* ---------------------------------------------------------------------------
  * Timer thread — same elapsed-time-not-fixed-period technique as
  * maze_host's timer_loop(), same empirically-measured RATE_CORRECTION
- * starting point (both hosts feed the same forceAudioIn.so consumer at the
+ * starting point (both hosts feed the same forceAudioJack.so consumer at the
  * same real 44.1kHz capture rate, so the same ~1000ppm drift applies) —
  * re-verify live and retune if a long-running stream shows backlog growth
  * or shrinkage in the periodic stats line below (see maze_host.cpp's own
@@ -235,7 +263,7 @@ static void timer_loop() {
  *
  *  - "mix.*" — host-level output-mix controls (on/off, volume, L/R/L+R
  *    routing), same convention as maze_host/force-acid. Lives in the
- *    shared-memory struct forceAudioIn.so reads directly.
+ *    shared-memory struct forceAudioJack.so reads directly.
  *  - "search_results_json" / "search_results_shadow_json" (GET only) — the
  *    DSP core exposes each search result as a set of separately-indexed
  *    keys (search_result_title_<n>/_channel_<n>/_duration_<n>/
@@ -905,15 +933,35 @@ static void handle_ctrl_line(int fd, const std::string &line) {
         }
         if (!strcmp(key, "skipback_toggle")) {
             bool now_running = skipback_is_running();
-            send_skipback_toggle(!now_running);
+            bool want_running = !now_running;
+            send_skipback_toggle(want_running);
+            /* Optimistic, same principle as the POWER pill's own instant-
+             * flip-then-self-correct (see force_shadow.c) -- the actual
+             * spawn/kill is a real nodeServer round trip (~500ms+), not
+             * worth blocking this reply on. */
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                set_status_message(want_running ? "SKIPBACK REC STARTED" : "SKIPBACK REC STOPPED");
+            }
             send(fd, "OK\n", 3, 0);
             return;
         }
         if (!strcmp(key, "stop") || !strcmp(key, "stop_step")) {
             clear_nowplaying_file();
         }
-        std::lock_guard<std::mutex> lk(g_lock);
-        g_api->set_param(g_inst, key, val);
+        /* Same STATUS-bar confirmation as skipback_toggle above, for the
+         * other TRANSPORT actions that have no lasting state of their own
+         * to show (stop clears back to a bare "stopped" a moment later
+         * anyway; rewind/forward don't change stream_status at all). Set
+         * optimistically before the real action below, same reasoning as
+         * skipback's own. */
+        {
+            std::lock_guard<std::mutex> lk(g_lock);
+            if (!strcmp(key, "stop_step")) set_status_message("STOPPED");
+            else if (!strcmp(key, "rewind_15_step")) set_status_message("REWIND 15S");
+            else if (!strcmp(key, "forward_15_step")) set_status_message("FORWARD 15S");
+            g_api->set_param(g_inst, key, val);
+        }
         send(fd, "OK\n", 3, 0);
         return;
     }
@@ -1056,6 +1104,15 @@ static void handle_ctrl_line(int fd, const std::string &line) {
             std::string real_key = keystr.substr(0, keystr.size() - kShadowSuffix.size());
             std::string mix_v;
             std::string raw;
+            if (real_key == "stream_status") {
+                std::lock_guard<std::mutex> lk(g_lock);
+                std::string msg = get_status_message_locked();
+                if (!msg.empty()) {
+                    std::string reply = shadow_font_safe(msg) + "\n";
+                    send(fd, reply.c_str(), reply.size(), 0);
+                    return;
+                }
+            }
             if (handle_mix_get(real_key, mix_v)) {
                 raw = mix_v;
             } else {
@@ -1130,7 +1187,7 @@ static void usage(const char *me) {
         "                        path to ForceAudioJackSkipback's own NSMODULE.json,\n"
         "                        for the SKIPBACK REC button (default: a CHANGE_ME\n"
         "                        placeholder - see README.md)\n"
-        "  --mix-slot N          voice slot 0..%d for forceAudioIn.so (default: 0) -\n"
+        "  --mix-slot N          voice slot 0..%d for forceAudioJack.so (default: 0) -\n"
         "                        each simultaneous voice needs a distinct slot\n",
         me, AI_MAX_VOICES - 1);
 }
@@ -1227,7 +1284,7 @@ int main(int argc, char **argv) {
     fprintf(stderr,
         "[cratedigger] up. ctrl socket %s  shm %s  module_dir %s\n"
         "[cratedigger] audio is mixed into the Force's capture input via\n"
-        "[cratedigger] ForceAudioIn (must be enabled separately).\n",
+        "[cratedigger] ForceAudioJack (must be enabled separately).\n",
         g_ctrl_sock_path.c_str(), g_shm_name, module_dir.c_str());
 
     std::thread timer(timer_loop);

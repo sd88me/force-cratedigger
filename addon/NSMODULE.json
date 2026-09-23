@@ -12,7 +12,7 @@
     { "NAME": "ctrl-sock flag", "VALUE": "--ctrl-sock" },
     { "NAME": "control socket path", "VALUE": "/tmp/cratedigger_ctrl.sock" },
     { "NAME": "mix-slot flag", "VALUE": "--mix-slot" },
-    { "NAME": "forceAudioJack voice slot (0-3)", "VALUE": "0" },
+    { "NAME": "forceAudioJack voice slot (0-7; 4, since 0=Maze Voice, 1=JV-880, 2=DX7, 3=Kit Builder Preview)", "VALUE": "4" },
     { "NAME": "skipback-nsmodule-path flag", "VALUE": "--skipback-nsmodule-path" },
     { "NAME": "path to ForceAudioJackSkipback's own NSMODULE.json - EDIT to your device's real mmPath, see README", "VALUE": "/media/<serial>/AddOns/ForceAudioJackSkipback/NSMODULE.json" }
   ]
