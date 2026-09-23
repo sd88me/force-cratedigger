@@ -59,7 +59,7 @@ enum {
     effProcessEvents = 25, effCanBeAutomated = 26, effGetPlugCategory = 35, effGetEffectName = 45,
     effGetVendorString = 47, effGetProductString = 48, effGetVendorVersion = 49, effCanDo = 51, effGetVstVersion = 58,
 };
-enum { audioMasterAutomate = 0 };
+enum { audioMasterAutomate = 0, audioMasterUpdateDisplay = 42 };
 enum { effFlagsCanReplacing = 1 << 4, effFlagsProgramChunks = 1 << 5, effFlagsIsSynth = 1 << 8 };
 
 /* ---- constants ------------------------------------------------------------ */
@@ -83,6 +83,8 @@ struct Plugin {
     int page = 0;
     float gain = 1.0f;
     volatile char release[NPARAMS];       /* triggers to report back to 0 */
+    float last[NPARAMS];                  /* last value MPC set, per param (triggers fire on change) */
+    std::string shown;                    /* all display text at the last UpdateDisplay */
     char chunk[256];
 };
 
@@ -192,10 +194,41 @@ static void do_search(Plugin *p) {
     LOG("search %s\n", json.c_str());
 }
 
+static std::string display(Plugin *p, int i);
+
+/* MPC only re-reads parameter text after audioMasterUpdateDisplay (verified: without it,
+ * readouts stay frozen). Called from the worker a few times a second; notifies only on change. */
+static void refresh_display(Plugin *p) {
+    std::string all;
+    {
+        std::lock_guard<std::mutex> lk(p->lock);
+        for (int i = 0; i < NPARAMS; i++)
+            if (PARAMS[i].type != T_TRIGGER) { all += display(p, i); all += '\x1f'; }
+    }
+    if (all != p->shown) {
+        p->shown = all;
+        p->master(&p->fx, audioMasterUpdateDisplay, 0, 0, nullptr, 0.0f);
+    }
+}
+
+/* Triggers go back to 0 from here, not the audio callback (MPC may not call process() for a
+ * silent track). */
+static void flush_releases(Plugin *p) {
+    for (int i = 0; i < NPARAMS; i++)
+        if (p->release[i]) { p->release[i] = 0; p->last[i] = 0.0f; p->master(&p->fx, audioMasterAutomate, i, 0, nullptr, 0.0f); }
+}
+
 /* ---- worker: the core renders here, never on MPC's audio thread ------------ */
 static void worker_main(Plugin *p) {
     int16_t block[BLOCK * 2];
+    auto next_ui = std::chrono::steady_clock::now();
     while (p->running.load()) {
+        auto now = std::chrono::steady_clock::now();
+        if (now >= next_ui) {
+            next_ui = now + std::chrono::milliseconds(200);
+            flush_releases(p);
+            refresh_display(p);
+        }
         uint32_t fill = p->wpos.load() - p->rpos.load();
         if (fill + BLOCK > (uint32_t)TARGET_FILL) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -218,8 +251,6 @@ static void worker_main(Plugin *p) {
 static void processReplacing(AEffect *e, float **in, float **out, int32_t n) {
     Plugin *p = (Plugin *)e->object;
     (void)in;
-    for (int i = 0; i < NPARAMS; i++)
-        if (p->release[i]) { p->release[i] = 0; p->master(e, audioMasterAutomate, i, 0, 0, 0.0f); }
     uint32_t r = p->rpos.load(), avail = p->wpos.load() - r;
     for (int32_t i = 0; i < n; i++) {
         if ((uint32_t)i < avail) {
@@ -290,7 +321,11 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     case T_TRIGGER: break;
     default: return;
     }
-    if (v <= 0.5f) return;
+    /* A tap on a button toggles its value; fire on any change, so a button MPC still shows as
+     * "on" works on the next tap too. Our own spring-back to 0 is excluded (release sets last). */
+    bool fire = std::fabs(v - p->last[i]) > 0.25f;
+    p->last[i] = v;
+    if (!fire) return;
     p->release[i] = 1;
     if (i >= P_GENRE_PREV && i <= P_COUNTRY_NEXT) {
         int d = (i - P_GENRE_PREV) / 2, dir = ((i - P_GENRE_PREV) % 2) ? 1 : -1;
@@ -455,6 +490,7 @@ extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMa
     p->api = api;
     p->master = master;
     std::memset((void *)p->release, 0, sizeof p->release);
+    for (int i = 0; i < NPARAMS; i++) p->last[i] = 0.0f;
     p->core = api->create_instance(dir.c_str(), nullptr);
     if (!p->core) { delete p; return nullptr; }
     api->set_param(p->core, "search_provider", "cratedig");
