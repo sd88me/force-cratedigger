@@ -191,7 +191,33 @@ static void ring_push(const float *interleaved, uint32_t frames) {
 static std::atomic<double>   g_max_wake_ms{0.0};
 static std::atomic<uint64_t> g_late_wakes{0};
 static std::atomic<uint64_t> g_total_wakes{0};
-constexpr double RATE_CORRECTION = 44100.0 / (44100.0 - 45.0);   /* ~1.00102 */
+/* Bug (2026-09-24, live device): the 45-sample constant above was
+ * maze_host's own empirically-measured value, reused here only as "a
+ * starting point" per this comment's own original wording (never
+ * actually re-measured against this host's real consumption path).
+ * Confirmed live: a fresh stream's shm-ring backlog (the periodic
+ * stats line below) drained from ~4200 frames down to a ~100-180 frame
+ * floor within the first ~60s of continuous playback - this host's
+ * true production rate was short by ~64 frames/sec (~1460ppm), not the
+ * ~1020ppm the old constant corrected for. That's "glitches after
+ * about a minute": the initial BUFFERING prime (prime_needed_samples)
+ * bought enough slack to mask the deficit briefly, then the ring ran
+ * low enough to actually underrun. Re-measured empirically the same
+ * way this comment already asked for (two backlog/wake-count readings
+ * from a real playing stream, see DESIGN.md for the worked
+ * calculation) - if a future stream still shows backlog trending
+ * toward zero over a couple of minutes rather than staying roughly
+ * flat, this needs re-measuring again, not assumed still correct.
+ *
+ * Two live measurements taken, one on each side of zero drift (45 ->
+ * -64.4 frames/s deficit; a first-pass overcorrection to 109 -> +30.0
+ * frames/s surplus, confirmed safe on its own - the shm ring is 65536
+ * frames/~1.5s deep, so even that surplus would take ~33 minutes to
+ * reach the overflow ceiling), then linearly interpolated between them
+ * for a value close to true zero drift rather than settling for
+ * "safe but still drifting" on a feature that may run for a long
+ * single sitting. */
+constexpr double RATE_CORRECTION = 44100.0 / (44100.0 - 89.0);   /* ~1.00202 */
 
 static void timer_loop() {
     constexpr int MAX_FRAMES = 4096;   /* generous — webstream's own ring is 60s deep */
