@@ -183,58 +183,54 @@ Requires Docker with armhf emulation (see
 
 `dist/ForceCrateDigger/` is the full addon folder, ready to deploy.
 
-## Deploy
+## Installation
 
 ```sh
-./scripts/deploy.sh root@<force-ip>
+scripts/deploy.sh root@<force-ip>
 ```
 
-Or by hand: `scp -r dist/ForceCrateDigger root@<force-ip>:<mmPath>/AddOns/ForceCrateDigger`
-(get `mmPath` from the device with `cat /dev/shm/.mmPath` over SSH).
+One command copies `dist/ForceCrateDigger/` onto the device, patches the
+two files that hardcode absolute addon-install paths
+(`addon/NSMODULE.json` and `addon/shadow_page.conf` both ship with the
+literal sentinel `/media/CHANGE_ME` in place of the real, per-device
+`mmPath` — MockbaMod addon paths vary by SD card, so a build step can't
+know it in advance) to the real path this script already looked up, then
+runs `manage.sh ENABLE` for both the engine and the web GUI. The two
+files' path occurrences (including the one embedded in
+`shadow_page.conf`'s `engine_arguments_json`, which force-shadow's engine
+on/off button re-sends verbatim to nodeServer) must stay byte-for-byte
+identical — patching both from one source value, instead of hand-editing
+each, is what actually guarantees that now.
 
-## Required per-device edits before enabling
-
-Two files hardcode absolute paths to addon install locations —
-`/media/CHANGE_ME/AddOns/ForceCrateDigger` and (for the Skipback Rec
-button) `/media/CHANGE_ME/AddOns/ForceAudioJackSkipback/NSMODULE.json` —
-because MockbaMod addon paths are genuinely per-device (the SD card's
-mount point varies), not something a build step can know in advance.
-This is the same situation force-maze/ForceMazeVoice's own
-`NSMODULE.json` is in. **Before enabling, edit every occurrence to your
-real path** (SSH in, `cat /dev/shm/.mmPath`, then
-`<that>/AddOns/ForceCrateDigger` / `<that>/AddOns/ForceAudioJackSkipback`):
-
-- `addon/NSMODULE.json` → the two `ARGUMENTS` entries with `NAME`
-  containing "EDIT to your device's real mmPath" (one for this addon's
-  own module dir, one for Skipback's NSMODULE.json path)
-- `addon/shadow_page.conf` → `engine_nsmodule_path` and the matching
-  entries inside `engine_arguments_json` (these two **must stay byte-for-
-  byte identical** — Force Shadow's engine on/off button re-sends
-  `engine_arguments_json` verbatim to nodeServer, so a stale copy would
-  silently corrupt the real `NSMODULE.json` on next toggle)
-
-## Enable
+This is equivalent to, and replaces, manually running:
 
 ```sh
+ssh root@<force-ip> "rm -rf '<mmPath>/AddOns/ForceCrateDigger'"
+scp -r dist/ForceCrateDigger root@<force-ip>:<mmPath>/AddOns/ForceCrateDigger
+ssh root@<force-ip> "sed -i 's|/media/CHANGE_ME|<mmPath>|g' '<mmPath>/AddOns/ForceCrateDigger/NSMODULE.json' '<mmPath>/AddOns/ForceCrateDigger/shadow_page.conf'"
 ssh root@<force-ip> '"<mmPath>/AddOns/ForceCrateDigger/manage.sh" ENABLE'
 ssh root@<force-ip> '"<mmPath>/AddOns/ForceCrateDigger/web/manage.sh" ENABLE'
 ```
 
-Then, separately:
+(get `mmPath` from the device with `cat /dev/shm/.mmPath` over SSH).
 
-1. Make sure [ForceAudioJack](https://github.com/sd88me/force-audio-jack) is
-   enabled (its own `manage.sh ENABLE`) — it arms the shared audio tap
-   this addon writes into. It is a hard dependency for audio output.
+Two things `deploy.sh` does **not** do for you — printed as a reminder when
+it finishes:
+
+1. Enable the separate [ForceAudioJack](https://github.com/sd88me/force-audio-jack)
+   addon (its own `manage.sh ENABLE`) — it arms the shared audio tap this
+   addon writes into. It is a hard dependency for audio output.
 2. Start `cratedigger_host` itself from the nodeServer Modules page
    (`http://<force-ip>:8080/moduler`) or via the shadow page's own engine
    button (ADD-ONS launcher → CRATE DIGGER, or your own device's combo if
-   you moved it to a free 1-7 slot) — it does **not** auto-launch at boot (see
-   `addon/NSMODULE.json`'s `AUTOLAUNCHABLE: false` and the comment in
+   you moved it to a free 1-7 slot) — it does **not** auto-launch at boot
+   (see `addon/NSMODULE.json`'s `AUTOLAUNCHABLE: false` and the comment in
    `addon/manage.sh`).
-3. Browse to `http://<force-ip>:8308/` for the web GUI (always running
-   once its own addon is enabled, independent of whether the engine is
-   started — every control there just answers "engine not running" until
-   `cratedigger_host`'s socket exists).
+
+Once enabled, browse to `http://<force-ip>:8308/` for the web GUI (always
+running once its own addon is enabled, independent of whether the engine
+is started — every control there just answers "engine not running" until
+`cratedigger_host`'s socket exists).
 
 ## Discogs token (optional but recommended)
 
