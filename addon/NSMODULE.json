@@ -8,12 +8,12 @@
   "AUTOLAUNCHABLE": false,
   "ARGUMENTS": [
     { "NAME": "module-dir flag", "VALUE": "--module-dir" },
-    { "NAME": "module directory (module.json/bin source) - EDIT to your device's real mmPath, see README", "VALUE": "/media/CHANGE_ME/AddOns/ForceCrateDigger" },
+    { "NAME": "module directory (module.json/bin source) - EDIT to your device's real mmPath, see README", "VALUE": "/media/<serial>/AddOns/ForceCrateDigger" },
     { "NAME": "ctrl-sock flag", "VALUE": "--ctrl-sock" },
     { "NAME": "control socket path", "VALUE": "/tmp/cratedigger_ctrl.sock" },
     { "NAME": "mix-slot flag", "VALUE": "--mix-slot" },
     { "NAME": "forceAudioJack voice slot (0-3)", "VALUE": "0" },
     { "NAME": "skipback-nsmodule-path flag", "VALUE": "--skipback-nsmodule-path" },
-    { "NAME": "path to ForceAudioJackSkipback's own NSMODULE.json - EDIT to your device's real mmPath, see README", "VALUE": "/media/CHANGE_ME/AddOns/ForceAudioJackSkipback/NSMODULE.json" }
+    { "NAME": "path to ForceAudioJackSkipback's own NSMODULE.json - EDIT to your device's real mmPath, see README", "VALUE": "/media/<serial>/AddOns/ForceAudioJackSkipback/NSMODULE.json" }
   ]
 }
