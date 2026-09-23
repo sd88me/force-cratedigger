@@ -11,6 +11,9 @@
  * ../../UPSTREAM_THIRD_PARTY_NOTICES.md for full attribution and
  * third-party (yt-dlp/ffmpeg) license terms.
  */
+#if defined(YT_POSIX_SPAWN) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE   /* posix_spawn_file_actions_addclosefrom_np */
+#endif
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -30,6 +33,54 @@
 
 #include "plugin_api_v1.h"
 #include "gain_state.h"
+
+#ifdef YT_POSIX_SPAWN
+/* Built into a host process that must not fork() (the MPC OS plugin build, where
+ * this core runs inside MPC itself, see force-cratedigger vst/): fork() would copy
+ * MPC's large, multithreaded address space and let children inherit every open file
+ * handle (display, audio, MIDI). Children are started with posix_spawn instead (vfork
+ * semantics), with fds 3+ closed, and with LD_PRELOAD removed from the environment
+ * (a host's preloaded libraries may not load in a plain child, e.g. MockbaMod's
+ * C++ ones fail in /bin/sh with exit 127). */
+#include <spawn.h>
+extern char **environ;
+
+static char **yt_child_env(void) {
+    static char *env[512];
+    int n = 0;
+    for (char **e = environ; e && *e && n < 511; e++)
+        if (strncmp(*e, "LD_PRELOAD=", 11) != 0) env[n++] = *e;
+    env[n] = NULL;
+    return env;
+}
+
+/* Returns the child pid, or -1. in_fd/out_fd >= 0 become the child's stdin/stdout. */
+static pid_t yt_spawn(const char *path, char *const argv[], int in_fd, int out_fd, int new_pgrp) {
+    posix_spawn_file_actions_t fa;
+    posix_spawnattr_t at;
+    sigset_t none, dflt;
+    pid_t pid = -1;
+    posix_spawn_file_actions_init(&fa);
+    if (in_fd >= 0) posix_spawn_file_actions_adddup2(&fa, in_fd, STDIN_FILENO);
+    if (out_fd >= 0) posix_spawn_file_actions_adddup2(&fa, out_fd, STDOUT_FILENO);
+    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    posix_spawnattr_init(&at);
+    sigemptyset(&none);
+    sigemptyset(&dflt);
+    sigaddset(&dflt, SIGPIPE);
+    sigaddset(&dflt, SIGTERM);
+    sigaddset(&dflt, SIGINT);
+    posix_spawnattr_setsigmask(&at, &none);
+    posix_spawnattr_setsigdefault(&at, &dflt);
+    short flags = POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF;
+    if (new_pgrp) { posix_spawnattr_setpgroup(&at, 0); flags |= POSIX_SPAWN_SETPGROUP; }
+    posix_spawnattr_setflags(&at, flags);
+    if (posix_spawn(&pid, path, &fa, &at, argv, yt_child_env()) != 0) pid = -1;
+    posix_spawn_file_actions_destroy(&fa);
+    posix_spawnattr_destroy(&at);
+    return pid;
+}
+#endif
 
 #define RING_SECONDS 60
 #define RING_SAMPLES (MOVE_SAMPLE_RATE * 2 * RING_SECONDS) /* stereo ring */
@@ -316,7 +367,17 @@ static int start_daemon_locked(yt_instance_t *inst, char *err, size_t err_len) {
         return -1;
     }
 
+#ifdef YT_POSIX_SPAWN
+    snprintf(daemon_path, sizeof(daemon_path), "%s/bin/yt_dlp_daemon.py", inst->module_dir);
+    snprintf(ytdlp_path, sizeof(ytdlp_path), "%s/bin/yt-dlp", inst->module_dir);
+    snprintf(python_path, sizeof(python_path), "%s/bin/python3/bin/python3.11", inst->module_dir);
+    {
+        char *argv[] = { python_path, daemon_path, ytdlp_path, NULL };
+        pid = yt_spawn(python_path, argv, parent_to_child[0], child_to_parent[1], 0);
+    }
+#else
     pid = fork();
+#endif
     if (pid < 0) {
         close(parent_to_child[0]);
         close(parent_to_child[1]);
@@ -326,6 +387,7 @@ static int start_daemon_locked(yt_instance_t *inst, char *err, size_t err_len) {
         return -1;
     }
 
+#ifndef YT_POSIX_SPAWN
     if (pid == 0) {
         snprintf(daemon_path, sizeof(daemon_path), "%s/bin/yt_dlp_daemon.py", inst->module_dir);
         snprintf(ytdlp_path, sizeof(ytdlp_path), "%s/bin/yt-dlp", inst->module_dir);
@@ -369,6 +431,7 @@ static int start_daemon_locked(yt_instance_t *inst, char *err, size_t err_len) {
         execl(python_path, python_path, daemon_path, ytdlp_path, (char *)NULL);
         _exit(127);
     }
+#endif
 
     close(parent_to_child[0]);
     close(child_to_parent[1]);
@@ -906,7 +969,14 @@ static int spawn_stream_command(yt_instance_t *inst, const char *cmd, const char
         return -1;
     }
 
+#ifdef YT_POSIX_SPAWN
+    {
+        char *argv[] = { (char *)"sh", (char *)"-lc", (char *)cmd, NULL };
+        pid = yt_spawn("/bin/sh", argv, -1, pipefd[1], 1);
+    }
+#else
     pid = fork();
+#endif
     if (pid < 0) {
         close(pipefd[0]);
         close(pipefd[1]);
@@ -914,6 +984,7 @@ static int spawn_stream_command(yt_instance_t *inst, const char *cmd, const char
         return -1;
     }
 
+#ifndef YT_POSIX_SPAWN
     if (pid == 0) {
         (void)setpgid(0, 0);
         dup2(pipefd[1], STDOUT_FILENO);
@@ -922,6 +993,7 @@ static int spawn_stream_command(yt_instance_t *inst, const char *cmd, const char
         execl("/bin/sh", "sh", "-lc", cmd, (char *)NULL);
         _exit(127);
     }
+#endif
 
     close(pipefd[1]);
     fp = fdopen(pipefd[0], "r");
@@ -2200,6 +2272,11 @@ static void sanitize_filename(const char *in, char *out, size_t out_len) {
 }
 
 static int download_spawn(yt_instance_t *inst, const char *cmd) {
+#ifdef YT_POSIX_SPAWN
+    char *argv[] = { (char *)"sh", (char *)"-c", (char *)cmd, NULL };
+    pid_t pid = yt_spawn("/bin/sh", argv, -1, -1, 1);
+    if (pid < 0) return -1;
+#else
     pid_t pid = fork();
     if (pid < 0) return -1;
     if (pid == 0) {
@@ -2207,6 +2284,7 @@ static int download_spawn(yt_instance_t *inst, const char *cmd) {
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
         _exit(127);
     }
+#endif
     inst->download_pid = pid;
     return 0;
 }
