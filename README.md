@@ -368,17 +368,18 @@ somewhere the daemon (`src/bin/yt_dlp_daemon.py`) can read:
 
 ## Releases
 
-Not tagged yet (current version: `0.2.0` in `addon/module.json`). The
-sibling repos this one was built alongside (`force-shadow`, `force-dx7`,
-`force-maze`, `force-audioin`) tag releases as `gh release create <tag>
---target <branch> --title … --notes …`, one version scheme per repo (e.g.
-`force-shadow` uses `v1.0.0`, `force-maze` tags per-module like
-`maze-voice-v1.0.0`) — see that convention (and the rest of the build →
-test → deploy → release loop these repos share) in this environment's
-`force-device-workflow` skill. This repo would follow the same plain
-`vX.Y.Z` scheme once it's had a real device test pass (see
-[Known limitations](#known-limitations-differences-from-the-move-original)) —
-premature before that.
+[`v0.2.0`](https://github.com/sd88me/force-cratedigger/releases/tag/v0.2.0)
+(2026-09-23) — first tagged release, after a full real-device test pass
+(Discogs search → YouTube playback → Skipback recording, verified
+end-to-end with genuine audible output). See that release's notes for
+what shipped in it. The sibling repos this one was built alongside
+(`force-shadow`, `force-dx7`, `force-maze`, `force-audioin`) tag releases
+as `gh release create <tag> --target <branch> --title … --notes …`, one
+version scheme per repo (e.g. `force-shadow` uses `v1.0.0`, `force-maze`
+tags per-module like `maze-voice-v1.0.0`) — see that convention (and the
+rest of the build → test → deploy → release loop these repos share) in
+this environment's `force-device-workflow` skill. This repo follows the
+same plain `vX.Y.Z` scheme, tracking `addon/module.json`'s own version.
 
 Third-party, unsupported community addon. Not affiliated with or endorsed
 by Akai, InMusic, Ableton, Charles Vestal, or Discogs. Users are
