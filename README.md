@@ -182,8 +182,21 @@ Requires Docker with armhf emulation (see
 ```
 
 `dist/ForceCrateDigger/` is the full addon folder, ready to deploy.
+`scripts/package.sh <version>` runs all four steps and zips that folder as
+`dist-zip/ForceCrateDigger-<version>.zip` - the release zip.
 
 ## Installation
+
+**From a release (no build needed):** download
+`ForceCrateDigger-<version>.zip` from the Releases page (under *Assets*,
+not the "Source code" archives) and unzip it onto the SD card root,
+overwriting the old files in `AddOns/ForceCrateDigger`. It's the full
+addon folder with the whole runtime bundled (yt-dlp, ffmpeg/ffprobe, the
+private Python 3.11 and zlib module), and the two `/media/<serial>` paths
+are already filled in with MockbaMod's `/media/662522`. Then run the two
+`manage.sh ENABLE` commands below on the device.
+
+**From a checkout:**
 
 ```sh
 scripts/deploy.sh root@<force-ip>
@@ -375,6 +388,12 @@ tags per-module like `maze-voice-v1.0.0`) — see that convention (and the
 rest of the build → test → deploy → release loop these repos share) in
 this environment's `force-device-workflow` skill. This repo follows the
 same plain `vX.Y.Z` scheme, tracking `addon/module.json`'s own version.
+
+Publishing a release runs `.github/workflows/release.yml`, which does the
+full build in CI (`scripts/package.sh`) and attaches
+`ForceCrateDigger-<tag>.zip` to it - that zip is what users install. Run the
+workflow by hand from the Actions tab with a tag to rebuild or backfill a
+release's zip (e.g. to pick up a newer yt-dlp without a code change).
 
 Third-party, unsupported community addon. Not affiliated with or endorsed
 by Akai, InMusic, Ableton, Charles Vestal, or Discogs. Users are
